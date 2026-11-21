@@ -215,7 +215,9 @@ function drawGroundImage(img, ppm, yFrom, yTo) {
     return;
   }
   const flip = viewSide === 'B' ? -1 : 1;
-  const N = 220;
+  // 每個螢幕像素列一條帶子（上限 1000），避免斜線出現階梯
+  const pxRows = Math.abs(proj.ground(0, yTo).y - proj.ground(0, yFrom).y);
+  const N = Math.max(60, Math.min(1000, Math.ceil(pxRows)));
   for (let i = 0; i < N; i++) {
     // 世界 y（遠→近）切片
     const y0 = yFrom + (yTo - yFrom) * (i / N), y1 = yFrom + (yTo - yFrom) * ((i + 1) / N);
@@ -245,14 +247,15 @@ function drawCourt() {
     // 佔位：程式畫球場
     fillQuad([[-HW - 3, -HL - 4], [HW + 3, -HL - 4], [HW + 3, HL + 4], [-HW - 3, HL + 4]], '#1d4a9a');
     fillQuad([[-HW, -HL], [HW, -HL], [HW, HL], [-HW, HL]], '#2f6fdd');
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, 0.05 * proj.s);
-    line(-HW, -HL, HW, -HL); line(-HW, HL, HW, HL);
-    line(-HW, -HL, -HW, HL); line(HW, -HL, HW, HL);
-    line(-SW, -HL, -SW, HL); line(SW, -HL, SW, HL);
-    line(-SW, -court.serviceLine, SW, -court.serviceLine); line(-SW, court.serviceLine, SW, court.serviceLine);
-    line(0, -court.serviceLine, 0, court.serviceLine);
-    line(0, -HL, 0, -HL + 0.3); line(0, HL, 0, HL - 0.3);
   }
+  // 線條一律用向量疊畫（底圖經透視條帶縮放後線會有鋸齒，向量線蓋上去就平滑）
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, 0.05 * proj.s); ctx.lineCap = 'butt';
+  line(-HW, -HL, HW, -HL); line(-HW, HL, HW, HL);
+  line(-HW, -HL, -HW, HL); line(HW, -HL, HW, HL);
+  line(-SW, -HL, -SW, HL); line(SW, -HL, SW, HL);
+  line(-SW, -court.serviceLine, SW, -court.serviceLine); line(-SW, court.serviceLine, SW, court.serviceLine);
+  line(0, -court.serviceLine, 0, court.serviceLine);
+  line(0, -HL, 0, -HL + 0.3); line(0, HL, 0, HL - 0.3);
 }
 
 function fillQuad(pts, color) {

@@ -128,6 +128,18 @@
 
 ---
 
+## ART-10 修訂單（第一批交付後的修改）
+
+第一批資源（commit `8ed4fdd`）已全部合併，尺寸與檔名全部符合規格，畫面效果很好。只需要以下修改：
+
+1. **球員圖去掉球拍**：`player_a_back.png`、`player_a_back_swing.png`、`player_a_front.png`、`player_a_front_swing.png`、
+   `player_b_*` 四張、`player_a_top.png`、`player_b_top.png` 共十張，請從 `art-src/` 的 SVG 移除球拍後重新輸出，
+   手改為空手（握拳在身側或準備姿勢）。原因：遊戲現在會依手機真實拍頭方向即時畫出球拍，圖上的拍子會變成兩支。
+2. **新增 `racket.png`**（規格見 ART-04b）：128 × 512 px，直立、拍頭在上、握把底端對齊圖片底緣中央。
+3. `art-src/` 請同步更新。
+
+驗收：`npm start` 後開 `/display?side=A`，加入一支手機並按「和電腦練習」，角色手上只有一支球拍，且會隨手機姿態轉動。
+
 ## 交付檢查清單
 
 - [ ] 檔名與 `public/assets/manifest.json` 完全一致（小寫、底線）
