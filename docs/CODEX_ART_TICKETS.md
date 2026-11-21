@@ -140,6 +140,16 @@
 
 驗收：`npm start` 後開 `/display?side=A`，加入一支手機並按「和電腦練習」，角色手上只有一支球拍，且會隨手機姿態轉動。
 
+## ART-11 走路動畫（選配，提升質感）
+
+目前角色移動時用程式做上下起伏、左右搖擺和腳步塵土，但圖上的腳不會真的交替。若要讓腳動起來，請交付走路循環圖：
+
+- 檔名：`player_a_back_walk.png`、`player_a_front_walk.png`、`player_b_back_walk.png`、`player_b_front_walk.png`
+- 規格：水平排列 **4 格**的 spritesheet，每格 400 × 600 px（整張 1600 × 600 px），透明背景，空手（球拍由程式畫），
+  四格為：右腳前 → 併攏 → 左腳前 → 併攏。腳底對齊每格底緣中央。
+- 俯視用：`player_a_top_walk.png`、`player_b_top_walk.png`，4 格各 256 × 256 px（整張 1024 × 256 px），面朝上。
+- 放進 `public/assets/` 並在 `manifest.json` 的 `images` 加上對應 key（`playerABackWalk` 等），程式會在角色移動時循環播放。
+
 ## 交付檢查清單
 
 - [ ] 檔名與 `public/assets/manifest.json` 完全一致（小寫、底線）
