@@ -216,14 +216,30 @@ setInterval(() => {
   }
 }, 15000);
 
+// 列出區網 IPv4，把實體 Wi-Fi / 乙太網路排前面，虛擬介面（VMware、Hyper-V、WSL、Docker、Tailscale…）排後面
 function lanAddresses() {
   const out = [];
-  for (const [, addrs] of Object.entries(os.networkInterfaces())) {
+  for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
     for (const a of addrs || []) {
-      if (a.family === 'IPv4' && !a.internal) out.push(a.address);
+      if (a.family !== 'IPv4' || a.internal) continue;
+      out.push({ address: a.address, name, score: scoreInterface(name, a.address) });
     }
   }
-  return out;
+  out.sort((x, y) => y.score - x.score);
+  return out.map((x) => x.address);
+}
+
+function scoreInterface(name, ip) {
+  const n = name.toLowerCase();
+  let score = 0;
+  if (/wi-?fi|wlan|無線|wireless|en0|en1/.test(n)) score += 30;
+  if (/^(ethernet|乙太|eth\d|enp|eno|區域連線)/.test(n)) score += 20;
+  if (/vethernet|vmware|vmnet|virtualbox|vbox|hyper-v|wsl|docker|tailscale|zerotier|hamachi|vpn|tun|tap|bridge|loopback|default switch/.test(n)) score -= 50;
+  if (/^192\.168\.|^10\./.test(ip)) score += 10;
+  if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)) score -= 40; // CGNAT（Tailscale）
+  if (/^169\.254\./.test(ip)) score -= 60;
+  if (/^192\.168\.(56|99|188|52)\.1$|\.1$/.test(ip)) score -= 15;    // 常見虛擬網卡閘道位址
+  return score;
 }
 
 server.listen(PORT, () => {

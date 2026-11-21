@@ -29,6 +29,7 @@ function onMessage(msg) {
     const u = new URL(location.href);
     if (u.searchParams.get('room') !== roomCode) { u.searchParams.set('room', roomCode); history.replaceState(null, '', u); }
     loadQr();
+    buildHostPicker();
   } else if (msg.type === 'state') {
     state = msg.state;
     stateAt = performance.now();
@@ -38,10 +39,11 @@ function onMessage(msg) {
 
 // ---------- QR ----------
 let qrImg = null, qrUrl = '';
+let hostIdx = 0;
 function controllerUrl() {
   const proto = location.protocol;
-  let host = location.hostname;
-  if ((host === 'localhost' || host === '127.0.0.1') && joined?.hosts?.length) host = joined.hosts[0];
+  let host = qs('host') || location.hostname;
+  if ((host === 'localhost' || host === '127.0.0.1') && joined?.hosts?.length) host = joined.hosts[hostIdx % joined.hosts.length];
   const port = location.port ? `:${location.port}` : '';
   return `${proto}//${host}${port}/controller?room=${roomCode}`;
 }
@@ -50,6 +52,23 @@ function loadQr() {
   const img = new Image();
   img.onload = () => { qrImg = img; };
   img.src = `/qr?text=${encodeURIComponent(qrUrl)}`;
+}
+
+// 大廳 IP 選擇（電腦有多張網卡時，讓 QR code 用手機連得到的那個 IP）
+function buildHostPicker() {
+  const box = document.getElementById('hosts');
+  if (!box) return;
+  const hosts = joined?.hosts || [];
+  const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (!local || hosts.length < 2) { box.style.display = 'none'; return; }
+  box.style.display = 'flex';
+  box.replaceChildren(document.createTextNode('QR code 用的 IP：'));
+  hosts.forEach((h, i) => {
+    const b = document.createElement('button');
+    b.textContent = h; b.className = i === hostIdx ? 'on' : '';
+    b.onclick = () => { hostIdx = i; loadQr(); buildHostPicker(); };
+    box.appendChild(b);
+  });
 }
 
 // ---------- 事件 / 音效 ----------
