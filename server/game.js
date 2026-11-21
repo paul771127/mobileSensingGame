@@ -50,6 +50,7 @@ export class Game {
       y: sign(side) * (HALF_L + COURT.baselineOffset),
       swingAnim: 0, // 揮拍動畫倒數（秒）
       speed: 7,     // 自動跑位速度 m/s
+      move: { x: 0, y: 0, t: -10 }, // 手機姿態控制的移動輸入（x: 右為正, y: 朝球網為正）
     };
   }
 
@@ -70,6 +71,13 @@ export class Game {
 
   bothReady() {
     return this.players.A.connected && this.players.B.connected;
+  }
+
+  // 手機姿態移動輸入
+  setMove(side, x, y) {
+    const p = this.players[side];
+    const n = (v) => (Number.isFinite(v) ? clamp(v, -1, 1) : 0);
+    p.move = { x: n(x), y: n(y), t: this.time };
   }
 
   // 單人練習：讓某一方由電腦操作
@@ -253,9 +261,9 @@ export class Game {
     speed *= 1 + 0.12 * Math.max(0, -arc);  // 殺球較快
 
     // 目標落點深度（距球網），力道越大越深；時機差會打太深（出界）或太淺（掛網）
-    // 挑高：稍深一點；壓平：更深更快（但弧線低，時機差就掛網）
-    let depth = 4.5 + s.strength * 6.0 + timingErr * 2.0 + (arc > 0 ? arc * 1.0 : -arc * 1.8);
-    depth = clamp(depth, 1.0, 14.5);
+    // 落點深度：輕揮 = 短球（約 2.5m），全力 = 接近底線（約 10m）；時機與弧線再微調
+    let depth = 2.5 + s.strength * 7.5 + timingErr * 1.5 + (arc > 0 ? arc * 1.0 : -arc * 1.2);
+    depth = clamp(depth, 1.2, 13.5);
     const targetY = dir * depth;
     // 時機太晚：球會往慣用手反方向偏（dir 修正讓 A/B 對稱）
     // lateralIn 的正值 = 球員自己的右手邊；A 面向 +y 時右邊是 +x，B 面向 -y 時右邊是 -x
@@ -264,7 +272,9 @@ export class Game {
 
     const dxT = targetX - b.x, dyT = targetY - b.y;
     const dist = Math.hypot(dxT, dyT);
-    const horiz = Math.max(speed * (0.75 + 0.25 * (1 - Math.abs(s.spin))), 7);
+    // 短球：水平速度放慢，拋物線自然變高，才放得到網前而不掛網
+    const shortK = clamp(0.5 + depth * 0.055, 0.5, 1);
+    const horiz = Math.max(speed * shortK * (0.75 + 0.25 * (1 - Math.abs(s.spin))), 5.5);
     const t = dist / horiz;
     const vx = dxT / t, vy = dyT / t;
     // 拋物線落在目標：z0 + vz t - 0.5 g t^2 = 0 → vz
@@ -389,8 +399,9 @@ export class Game {
       b.vx *= keep; b.vy *= keep;
       this.fx('bounce', b.x, b.y);
       const landSide = b.y < 0 ? 'A' : 'B';
-      const inX = Math.abs(b.x) <= HALF_W + 0.03;
-      const inY = Math.abs(b.y) <= HALF_L + 0.03;
+      const LINE = 0.12; // 壓線算進：球半徑約 0.033 + 線寬 0.05 再寬鬆一點
+      const inX = Math.abs(b.x) <= HALF_W + LINE;
+      const inY = Math.abs(b.y) <= HALF_L + LINE;
       b.bounces += 1;
       if (b.bounces === 1) {
         b.bounceSide = landSide;
@@ -414,26 +425,42 @@ export class Game {
     }
   }
 
-  // 球員自動跑位：接球方跑向球將到達自己 y 的 x；另一方回中
+  // 球員移動：手機姿態有輸入時手動移動；沒有輸入時自動跑向球（輔助）
   autoMove(dt) {
     const b = this.ball;
     for (const side of SIDES) {
       const p = this.players[side];
       const baseY = sign(side) * (HALF_L + COURT.baselineOffset);
-      let targetX = 0;
-      let targetY = baseY;
+      const serving = this.phase === 'serve' && this.server === side;
+      const mv = p.move;
+      const manual = !this.bot[side] && (mv.x !== 0 || mv.y !== 0) && this.time - mv.t < 0.6;
+      if (manual) {
+        const spd = 6.5;
+        // x：以球員自己的右手邊為正（A 面向 +y 右邊是 +x；B 相反）；y：朝球網為正
+        const dir = -sign(side);
+        p.x = clamp(p.x + mv.x * dir * spd * dt, -HALF_W - 2.5, HALF_W + 2.5);
+        const ny = p.y + mv.y * dir * spd * dt;
+        // 限制在自己半場：離網 1.5m 到底線後 3.5m
+        const minAbs = 1.5, maxAbs = HALF_L + 3.5;
+        p.y = sign(side) * clamp(Math.abs(ny) * (Math.sign(ny) === sign(side) || ny === 0 ? 1 : 0) || minAbs, minAbs, maxAbs);
+        continue;
+      }
+      let targetX = p.x, targetY = p.y;
+      if (serving) continue;
+      targetX = 0; targetY = baseY;
       if (b) {
         const towardMe = Math.sign(b.vy) === sign(side) && Math.abs(b.vy) > 0.01;
-        if (this.phase === 'serve' && this.server === side) {
-          targetX = p.x; targetY = p.y;
-        } else if (towardMe) {
+        if (towardMe) {
           const t = Math.max(0, (p.y - b.y) / b.vy);
           targetX = clamp(b.x + b.vx * t, -HALF_W - 1.5, HALF_W + 1.5);
-          // 若球落點很淺，往前站一點
           const land = predictLanding(b);
           if (land && Math.abs(land.y) < HALF_L - 3) {
             targetY = sign(side) * clamp(Math.abs(land.y) + 1.2, 3.5, HALF_L + COURT.baselineOffset);
           }
+        } else if (!this.bot[side]) {
+          // 對手回球前：留在原地（讓手動站位有意義），只在離譜時慢慢回中
+          targetX = Math.abs(p.x) > HALF_W + 1.5 ? Math.sign(p.x) * (HALF_W + 1.5) : p.x;
+          targetY = p.y;
         }
       }
       const dx = targetX - p.x, dy = targetY - p.y;
@@ -473,7 +500,8 @@ export class Game {
 
   playerSnap(side) {
     const p = this.players[side];
-    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim) };
+    const manual = (p.move.x !== 0 || p.move.y !== 0) && this.time - p.move.t < 0.6;
+    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual };
   }
 }
 

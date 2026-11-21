@@ -186,6 +186,12 @@ function handleMessage(ws, msg) {
       room.broadcast({ type: 'players', players: { A: room.game.players.A.connected, B: room.game.players.B.connected } });
       break;
     }
+    case 'move': {
+      // { type:'move', x:-1..1, y:-1..1 }  手機姿態移動
+      if (!room || ws.meta.role !== 'controller') return;
+      room.game.setMove(ws.meta.side, Number(msg.x), Number(msg.y));
+      break;
+    }
     case 'leave': {
       // 手機切到背景 / 關閉頁面：立刻視為離線，但保留 socket，回前景再 join
       leave(ws);

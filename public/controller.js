@@ -1,7 +1,8 @@
 import { connect, qs, loadAssets } from '/common.js';
 
 const $ = (id) => document.getElementById(id);
-const joinScreen = $('join'), playScreen = $('play');
+const joinScreen = $('join'), playScreen = $('play'), calibScreen = $('calibScreen');
+const show = (sec) => { for (const x of [joinScreen, calibScreen, playScreen]) x.classList.toggle('on', x === sec); };
 
 let room = (qs('room') || '').toUpperCase();
 let side = qs('side') || null;
@@ -32,14 +33,13 @@ const ws = connect(onMessage, () => {
 function onMessage(msg) {
   if (msg.type === 'joined') {
     mySide = msg.side; room = msg.room; joined = true;
-    joinScreen.classList.remove('on'); playScreen.classList.add('on');
+    show(playScreen);
     $('roomLabel').innerHTML = `房號 <b>${room}</b> · 你是 <b class="side-${mySide}">${mySide} 方</b>`;
     const u = new URL(location.href); u.searchParams.set('room', room); u.searchParams.set('side', mySide); history.replaceState(null, '', u);
     requestWakeLock();
-    baseHeading = null; // 加入當下視為正對球網
   } else if (msg.type === 'error') {
     $('joinMsg').textContent = msg.text;
-    joinScreen.classList.add('on'); playScreen.classList.remove('on');
+    show(joinScreen);
   } else if (msg.type === 'state') {
     lastState = msg.state; renderState(msg.state);
   } else if (msg.type === 'swing_ack') {
@@ -92,6 +92,30 @@ $('go').onclick = async () => {
   if (room.length !== 4) { $('joinMsg').textContent = '房號是 4 個字'; return; }
   $('joinMsg').textContent = '';
   await enableMotion(); // 需要在使用者點擊中呼叫（iOS）
+  startCalibration();
+};
+
+// ---------- 校正流程 ----------
+let calibTimer = null;
+function startCalibration() {
+  show(calibScreen);
+  $('calibDone').disabled = true;
+  $('calibLive').textContent = '等待姿態感測器…';
+  const t0 = performance.now();
+  clearInterval(calibTimer);
+  calibTimer = setInterval(() => {
+    if (orient) {
+      $('calibDone').disabled = false;
+      $('calibLive').textContent = `偵測到姿態：拍頭仰角 ${headElevDeg.toFixed(0)}°（直立 90°、水平 0°）`;
+    } else if (performance.now() - t0 > 2500) {
+      $('calibDone').disabled = false;
+      $('calibLive').textContent = '沒有收到姿態資料：將略過拍面控制，仍可用揮拍與點擊。';
+    }
+  }, 150);
+}
+$('calibDone').onclick = () => {
+  clearInterval(calibTimer);
+  captureBase();
   joined = true;
   ws.send({ type: 'join', role: 'controller', room, side, name: $('name').value, cid });
 };
@@ -121,7 +145,9 @@ async function enableMotion() {
 //   水平方位 = 拍面朝向（相對校正時的方位）、垂直分量 = 拍面仰角
 let orient = null;      // 最新姿態的矩陣
 let baseHeading = null; // 校正時的拍面方位（面向球網 / 電視）
-let faceDeg = 0, loftDeg = 0;
+let baseHeadElev = 90, baseTilt = 0; // 校正時拍頭仰角與左右傾
+let faceDeg = 0, loftDeg = 0, headElevDeg = 90, tiltDeg = 0, pitchDelta = 0, tiltDelta = 0;
+let lastHeading = 0;
 const DEG = Math.PI / 180;
 
 function rotMatrix(alpha, beta, gamma) {
@@ -142,15 +168,65 @@ function onOrientation(e) {
   orient = m;
   // 螢幕法線 (0,0,1) 在世界座標：(m13, m23, m33)；x 東 y 北 z 上
   const heading = Math.atan2(m.m13, m.m23) / DEG;  // 順時針為正
+  lastHeading = heading;
   if (baseHeading == null) baseHeading = heading;
-  faceDeg = wrapDeg(heading - baseHeading);
   loftDeg = Math.asin(Math.max(-1, Math.min(1, m.m33))) / DEG; // 正 = 拍面朝上
+  // 拍面幾乎朝天/朝地時法線沒有水平方位可言，拍面角度視為 0
+  faceDeg = Math.abs(m.m33) > 0.85 ? 0 : wrapDeg(heading - baseHeading);
+  // 拍頭方向 = 手機長軸 (0,1,0) 在世界座標：(m12, m22, m32)
+  headElevDeg = Math.asin(Math.max(-1, Math.min(1, m.m32))) / DEG; // 90 = 直立
+  // 以校正時的面向為準，拍頭往玩家右手邊傾多少度
+  const h = baseHeading * DEG;
+  const rightE = -Math.cos(h), rightN = Math.sin(h);        // 玩家右手邊（東/北分量）
+  const headRight = m.m12 * rightE + m.m22 * rightN;
+  tiltDeg = Math.atan2(headRight, Math.max(m.m32, 0.2)) / DEG; // 從正面看拍頭往右傾幾度
+  pitchDelta = headElevDeg - baseHeadElev;
+  tiltDelta = tiltDeg - baseTilt;
+  updateMove();
+}
+
+function captureBase() {
+  if (!orient) return;
+  baseHeading = lastHeading;
+  baseHeadElev = headElevDeg;
+  // 重新以新基準算一次左右傾，當成基準傾角
+  const h = baseHeading * DEG;
+  const m = orient;
+  const headRight = m.m12 * -Math.cos(h) + m.m22 * Math.sin(h);
+  baseTilt = Math.atan2(headRight, Math.max(m.m32, 0.2)) / DEG;
+  pitchDelta = 0; tiltDelta = 0;
 }
 
 function calibrate() {
-  baseHeading = null; // 下一筆姿態就成為新基準
-  $('status').textContent = '已校正：現在的方向 = 正對球網';
+  captureBase();
+  $('status').textContent = '已校正：現在的姿勢 = 正對球網的準備姿勢';
   if (vibrate && navigator.vibrate) navigator.vibrate(20);
+}
+
+// ---- 姿態 → 角色移動 ----
+// 拍頭左右傾 >30° 左右跑；往上抬 >30° 後退；往下壓 >30° 前進（可同時）。進入 30°、離開 22° 的遲滯避免抖動。
+const MOVE_ON = 30, MOVE_OFF = 22;
+let moveX = 0, moveY = 0, lastMoveSent = 0, lastMoveMsg = '';
+function axis(cur, val) {
+  if (cur === 0) return val > MOVE_ON ? 1 : val < -MOVE_ON ? -1 : 0;
+  return Math.abs(val) < MOVE_OFF || Math.sign(val) !== cur ? 0 : cur;
+}
+function updateMove() {
+  if (!joined) return;
+  const now = performance.now();
+  // 揮拍中與揮完 0.4 秒內不算移動
+  const busy = swinging || now - lastSwingAt < 400;
+  let mx = busy ? 0 : axis(moveX, tiltDelta);
+  let my = busy ? 0 : -axis(moveY, pitchDelta); // 抬高(正) → 後退(-1)；壓低 → 前進(+1)
+  if (mirror) mx = -mx;
+  const changed = mx !== moveX || my !== moveY;
+  moveX = mx; moveY = my;
+  if (changed || ((mx || my) && now - lastMoveSent > 300)) {
+    ws.send({ type: 'move', x: mx, y: my });
+    lastMoveSent = now;
+  }
+  const txt = (my > 0 ? '▲ 前進 ' : my < 0 ? '▼ 後退 ' : '') + (mx < 0 ? '◀ 左移' : mx > 0 ? '右移 ▶' : '');
+  if (txt !== lastMoveMsg) { $('moveInd').textContent = txt; lastMoveMsg = txt; }
 }
 
 // ---- 揮拍偵測 ----
@@ -188,15 +264,16 @@ function onMotion(e) {
     if ((mag < th * 0.5 && dur > 60) || dur > 220) {
       swinging = false; lastSwingAt = now;
       emitSwing(peak, accX / samples, rotY / samples, rotX / samples);
+      if (moveX || moveY) { moveX = 0; moveY = 0; ws.send({ type: 'move', x: 0, y: 0 }); $('moveInd').textContent = ''; lastMoveMsg = ''; }
     }
   }
   if (now % 10 < 1) updateDebug();
 }
 
 function emitSwing(peakMag, meanAx, meanGy, meanGx) {
-  // 力道：門檻以上到 ~45 m/s² 線性映射
+  // 力道：門檻以上到 ~55 m/s² 線性映射（輕揮 = 短球，全力才到底線）
   const th = SENS[sensIdx].th;
-  const strength = clamp((peakMag - th) / (45 - th), 0.15, 1);
+  const strength = clamp((peakMag - th) / (55 - th), 0.05, 1);
   // 揮動方向：陀螺儀繞手機長軸(gamma)，否則用橫向加速度
   let dirX = gyroAvail ? clamp(-meanGy / 250, -1, 1) : clamp(meanAx / 15, -1, 1);
   // 手腕翻轉(beta)：往下壓 = 上旋(正)，往上甩 = 下旋/挑(負)
@@ -243,8 +320,11 @@ tap.addEventListener('pointerup', (e) => {
   const dirX = clamp(((e.clientX - rect.left) / rect.width - 0.5) * 2, -1, 1) * (mirror ? -1 : 1);
   sendSwing({ strength, dirX, face: 0, loft: 0, plane: 0, spin: 0 });
 });
+const KEYMOVE = { KeyA: [-1, 0], KeyD: [1, 0], KeyW: [0, 1], KeyS: [0, -1] };
+addEventListener('keyup', (e) => { if (joined && KEYMOVE[e.code]) ws.send({ type: 'move', x: 0, y: 0 }); });
 addEventListener('keydown', (e) => {
   if (!joined) return;
+  if (KEYMOVE[e.code]) { e.preventDefault(); ws.send({ type: 'move', x: KEYMOVE[e.code][0], y: KEYMOVE[e.code][1] }); return; }
   const k = { Space: {}, ArrowUp: { plane: 0.8 }, ArrowDown: { plane: -0.8 }, ArrowLeft: { face: -0.7 }, ArrowRight: { face: 0.7 } }[e.code];
   if (k) { e.preventDefault(); sendSwing({ strength: 0.6, dirX: 0, face: 0, loft: 0, plane: 0, spin: 0, ...k }); }
 });
@@ -257,7 +337,7 @@ $('vib').onclick = () => { vibrate = !vibrate; $('vib').textContent = `震動：
 
 function updateDebug() {
   $('debug').textContent = `acc ${debugAcc.toFixed(1)} m/s²  gyro ${gyroAvail ? 'yes' : 'no'}  th ${SENS[sensIdx].th}  plane ${lastPlane.toFixed(2)}`;
-  $('face').textContent = orient ? `拍面 ${faceDeg >= 0 ? '+' : ''}${faceDeg.toFixed(0)}°  仰角 ${loftDeg >= 0 ? '+' : ''}${loftDeg.toFixed(0)}°` : '（此裝置沒有姿態感測）';
+  $('face').textContent = orient ? `拍面 ${faceDeg >= 0 ? '+' : ''}${faceDeg.toFixed(0)}°  拍頭仰 ${pitchDelta >= 0 ? '+' : ''}${pitchDelta.toFixed(0)}°  傾 ${tiltDelta >= 0 ? '+' : ''}${tiltDelta.toFixed(0)}°` : '（此裝置沒有姿態感測）';
 }
 setInterval(updateDebug, 120);
 

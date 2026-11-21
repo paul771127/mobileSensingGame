@@ -51,6 +51,15 @@
   <p id="joinMsg" class="muted" style="min-height:20px;font-size:14px"></p>
 </section>
 
+<section id="calibScreen" class="screen" style="flex-direction:column;align-items:center;justify-content:center;gap:16px;min-height:100vh;padding:24px;text-align:center">
+  <h2 style="margin:0">📱 拍面校正</h2>
+  <div style="font-size:72px;line-height:1">🎾</div>
+  <p style="max-width:320px;margin:0">用你的<b>準備姿勢</b>握住手機（建議拍頭斜向前上方約 45°），螢幕朝向自己，<b>正對電視</b>，保持不動後按下方按鈕。這個姿勢就是「不移動」的基準。</p>
+  <p id="calibLive" class="muted" style="font-size:14px;min-height:20px">等待姿態感測器…</p>
+  <button id="calibDone" class="btn" disabled>完成校正</button>
+  <p class="muted" style="font-size:13px;max-width:320px">之後不揮拍時：拍頭往左右傾超過 30° 角色就往該方向跑，往上抬超過 30° 後退、往下壓超過 30° 前進。</p>
+</section>
+
 <section id="play" class="screen">
   <div id="top">
     <span id="roomLabel"></span>
@@ -65,6 +74,7 @@
     <div id="meter"><i></i></div>
     <div id="shot" class="muted" style="font-size:13px;min-height:18px"></div>
     <div id="face" class="muted" style="font-size:13px;min-height:18px"></div>
+    <div id="moveInd" style="font-size:22px;font-weight:800;min-height:28px;letter-spacing:.1em"></div>
   </div>
   <div id="bottom">
     <button id="botBtn" class="btn secondary" style="display:none;width:100%">🤖 找不到對手？和電腦練習</button>
