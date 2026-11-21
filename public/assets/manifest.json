@@ -6,6 +6,7 @@
     "net": "net.png",
     "ball": "ball.png",
     "ballShadow": "ball_shadow.png",
+    "racket": "racket.png",
     "playerATop": "player_a_top.png",
     "playerBTop": "player_b_top.png",
     "playerABack": "player_a_back.png",
