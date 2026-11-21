@@ -59,6 +59,7 @@ let isSecure = false;
 let server;
 const keyPath = path.join(CERT_DIR, 'key.pem');
 const certPath = path.join(CERT_DIR, 'cert.pem');
+try { fs.mkdirSync(CERT_DIR, { recursive: true }); } catch { /* ignore */ }
 if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
   server = https.createServer({ key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) }, handleHttp);
   isSecure = true;
@@ -247,5 +248,11 @@ server.listen(PORT, () => {
   console.log(`\n🎾 Mobile Sensing Game server`);
   console.log(`   顯示端（電視/電腦）: ${proto}://localhost:${PORT}/display`);
   for (const h of lanAddresses()) console.log(`   區網網址:            ${proto}://${h}:${PORT}/display`);
-  if (!isSecure) console.log(`   ⚠ 目前是 HTTP。iPhone 需要 HTTPS 才能讀感測器，請見 README 建立 certs/。`);
+  if (!isSecure) {
+    const sep = process.platform === 'win32' ? '\\' : '/';
+    const ips = lanAddresses().slice(0, 2).join(' ');
+    console.log(`   ⚠ 目前是 HTTP。iPhone 需要 HTTPS 才能讀感測器。在專案資料夾執行下面兩行後重新啟動：`);
+    console.log(`       mkcert -install`);
+    console.log(`       mkcert -key-file certs${sep}key.pem -cert-file certs${sep}cert.pem localhost 127.0.0.1 ${ips}`);
+  }
 });
