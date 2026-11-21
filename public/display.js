@@ -358,6 +358,7 @@ function drawPlayer(side) {
       ctx.drawImage(img, -sz / 2, -sz / 2, sz, sz); ctx.restore();
     } else ctx.drawImage(img, g.x - w / 2, g.y - h, w, h);
     if (!p.connected) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(g.x - 0.6 * g.s, g.y - 2 * g.s, 1.2 * g.s, 2 * g.s); }
+    drawRacket(side, p, swinging, 0);
     return;
   }
   // 佔位：色塊球員 + 球拍
@@ -372,12 +373,8 @@ function drawPlayer(side) {
     roundRect(g.x - 0.3 * g.s, g.y - bodyH, 0.6 * g.s, bodyH * 0.75, 0.15 * g.s); ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.arc(g.x, g.y - bodyH * 0.9, 0.22 * g.s, 0, Math.PI * 2); ctx.fillStyle = '#ffd9b3'; ctx.fill(); ctx.stroke();
   }
-  // 球拍
-  const ang = swinging ? -0.9 + (0.35 - p.swingAnim) / 0.35 * 2.0 : -0.6;
-  const rx = g.x + Math.cos(ang) * 0.55 * g.s, ry = (proj.type === 'top' ? g.y : g.y - bodyH * 0.55) + Math.sin(ang) * 0.55 * g.s;
-  ctx.strokeStyle = '#222'; ctx.lineWidth = Math.max(2, 0.05 * g.s);
-  ctx.beginPath(); ctx.moveTo(g.x + Math.cos(ang) * 0.3 * g.s, (proj.type === 'top' ? g.y : g.y - bodyH * 0.55) + Math.sin(ang) * 0.3 * g.s); ctx.lineTo(rx, ry); ctx.stroke();
-  ctx.fillStyle = swinging ? COLORS.accent : '#eee'; ctx.beginPath(); ctx.ellipse(rx, ry, 0.16 * g.s, 0.2 * g.s, ang, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  // 球拍：依手機回報的拍頭方向在 3D 畫出來；揮拍時做橫掃動畫
+  drawRacket(side, p, swinging, proj.type === 'top' ? 0 : bodyH);
   // 名字
   ctx.fillStyle = '#fff'; ctx.font = `${Math.max(12, 0.28 * g.s)}px system-ui`; ctx.textAlign = 'center';
   ctx.fillText(p.name + (p.connected ? '' : '（離線）'), g.x, g.y - (proj.type === 'top' ? 0.6 * g.s : bodyH + 0.4 * g.s));
@@ -390,6 +387,55 @@ function ballRadius(p, z) {
 }
 
 const trail = []; // 拖尾
+// 玩家座標（右/前/上）→ 世界座標。A 面向 +y：右 = +x；B 面向 -y：右 = -x
+function playerToWorld(side, r, f, u) {
+  const dir = side === 'A' ? 1 : -1;
+  return { x: r * dir, y: f * dir, z: u };
+}
+
+function drawRacket(side, p, swinging, bodyH) {
+  let h = Array.isArray(p.head) ? { r: p.head[0], f: p.head[1], u: p.head[2] } : null;
+  if (swinging) {
+    // 橫掃：從身體右後方掃到左前方（以玩家自己的左右為準）
+    const k = 1 - p.swingAnim / 0.35; // 0→1
+    const ang = -0.9 + k * 2.2;
+    h = { r: Math.cos(ang) * 0.95, f: Math.sin(ang) * 0.6 + 0.3, u: 0.25 };
+  } else if (!h) {
+    h = { r: 0.5, f: 0.35, u: 0.8 }; // 沒有姿態資料時的預設準備姿勢
+  }
+  const n = Math.hypot(h.r, h.f, h.u) || 1;
+  const hv = playerToWorld(side, h.r / n, h.f / n, h.u / n);
+  const handLocal = playerToWorld(side, 0.3, 0.1, 0);
+  const handZ = 1.0; // 手的高度
+  const len = 0.68;  // 球拍長度
+  const hx = p.x + handLocal.x, hy = p.y + handLocal.y;
+  const a = proj.p(hx, hy, handZ);
+  const b = proj.p(hx + hv.x * len, hy + hv.y * len, handZ + hv.z * len);
+  const headR = 0.14 * b.s;
+  const img = assets.racket;
+  if (img) {
+    // 圖片：握把底端在 a、拍頭朝 b，長度 = 兩點螢幕距離
+    const L = Math.hypot(b.x - a.x, b.y - a.y), ang0 = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+    const w = L * (img.width / img.height);
+    ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(ang0);
+    ctx.drawImage(img, -w / 2, -L, w, L); ctx.restore();
+    return;
+  }
+  ctx.strokeStyle = '#222'; ctx.lineWidth = Math.max(2, 0.05 * a.s); ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  // 拍面：垂直於拍柄方向的橢圓（用螢幕上的方向近似）
+  const ang = Math.atan2(b.y - a.y, b.x - a.x);
+  ctx.fillStyle = swinging ? COLORS.accent : 'rgba(255,255,255,0.92)';
+  ctx.strokeStyle = '#222'; ctx.lineWidth = Math.max(1.5, 0.035 * b.s);
+  ctx.beginPath(); ctx.ellipse(b.x, b.y, headR * 1.15, headR * 0.85, ang, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+  for (let i = -2; i <= 2; i++) {
+    const o = i * headR * 0.3;
+    ctx.beginPath(); ctx.moveTo(b.x + Math.cos(ang + Math.PI / 2) * o - Math.cos(ang) * headR, b.y + Math.sin(ang + Math.PI / 2) * o - Math.sin(ang) * headR);
+    ctx.lineTo(b.x + Math.cos(ang + Math.PI / 2) * o + Math.cos(ang) * headR, b.y + Math.sin(ang + Math.PI / 2) * o + Math.sin(ang) * headR); ctx.stroke();
+  }
+}
+
 function drawBall(b) {
   const p = proj.p(b.x, b.y, b.z);
   const r = ballRadius(p, b.z);

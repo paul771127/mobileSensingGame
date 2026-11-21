@@ -51,6 +51,7 @@ export class Game {
       swingAnim: 0, // 揮拍動畫倒數（秒）
       speed: 7,     // 自動跑位速度 m/s
       move: { x: 0, y: 0, t: -10 }, // 手機姿態控制的移動輸入（x: 右為正, y: 朝球網為正）
+      head: null, // 拍頭方向單位向量 { r, f, u }（玩家座標：右/前/上），無感測器時為 null
     };
   }
 
@@ -78,6 +79,12 @@ export class Game {
     const p = this.players[side];
     const n = (v) => (Number.isFinite(v) ? clamp(v, -1, 1) : 0);
     p.move = { x: n(x), y: n(y), t: this.time };
+  }
+
+  setPose(side, r, f, u) {
+    if (![r, f, u].every(Number.isFinite)) return;
+    const n = Math.hypot(r, f, u) || 1;
+    this.players[side].head = { r: r / n, f: f / n, u: u / n };
   }
 
   // 單人練習：讓某一方由電腦操作
@@ -501,7 +508,8 @@ export class Game {
   playerSnap(side) {
     const p = this.players[side];
     const manual = (p.move.x !== 0 || p.move.y !== 0) && this.time - p.move.t < 0.6;
-    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual };
+    const head = p.head ? [round(p.head.r, 2), round(p.head.f, 2), round(p.head.u, 2)] : null;
+    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual, head };
   }
 }
 

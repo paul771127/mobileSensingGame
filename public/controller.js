@@ -182,7 +182,23 @@ function onOrientation(e) {
   tiltDeg = Math.atan2(headRight, Math.max(m.m32, 0.2)) / DEG; // 從正面看拍頭往右傾幾度
   pitchDelta = headElevDeg - baseHeadElev;
   tiltDelta = tiltDeg - baseTilt;
+  // 拍頭單位向量（玩家座標：右 / 前 / 上），給顯示端畫球拍方向
+  const fwdE = -Math.sin(h), fwdN = -Math.cos(h);
+  headVec = { r: headRight * (mirror ? -1 : 1), f: m.m12 * fwdE + m.m22 * fwdN, u: m.m32 };
   updateMove();
+  sendPose();
+}
+
+// 拍頭方向：每 100ms 最多送一次，變化夠大才送
+let headVec = null, lastPoseSent = 0, lastPose = null;
+function sendPose(force = false) {
+  if (!joined || !headVec) return;
+  const now = performance.now();
+  if (!force && now - lastPoseSent < 100) return;
+  const h = headVec;
+  if (!force && lastPose && Math.abs(h.r - lastPose.r) < 0.03 && Math.abs(h.f - lastPose.f) < 0.03 && Math.abs(h.u - lastPose.u) < 0.03) return;
+  lastPose = { ...h }; lastPoseSent = now;
+  ws.send({ type: 'pose', r: +h.r.toFixed(3), f: +h.f.toFixed(3), u: +h.u.toFixed(3) });
 }
 
 function captureBase() {

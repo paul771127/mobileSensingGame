@@ -192,6 +192,12 @@ function handleMessage(ws, msg) {
       room.game.setMove(ws.meta.side, Number(msg.x), Number(msg.y));
       break;
     }
+    case 'pose': {
+      // { type:'pose', r, f, u }  拍頭方向單位向量（玩家座標）
+      if (!room || ws.meta.role !== 'controller') return;
+      room.game.setPose(ws.meta.side, Number(msg.r), Number(msg.f), Number(msg.u));
+      break;
+    }
     case 'leave': {
       // 手機切到背景 / 關閉頁面：立刻視為離線，但保留 socket，回前景再 join
       leave(ws);
