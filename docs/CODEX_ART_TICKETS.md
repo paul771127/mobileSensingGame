@@ -150,6 +150,23 @@
 - 俯視用：`player_a_top_walk.png`、`player_b_top_walk.png`，4 格各 256 × 256 px（整張 1024 × 256 px），面朝上。
 - 放進 `public/assets/` 並在 `manifest.json` 的 `images` 加上對應 key（`playerABackWalk` 等），程式會在角色移動時循環播放。
 
+## ART-12 八方向走路圖（取代 ART-11，優先）
+
+角色現在會朝移動方向面向與行走（8 方向）。請為 A、B 各交付一張 spritesheet：
+
+- 檔名：`public/assets/player_a_8dir.png`、`public/assets/player_b_8dir.png`
+- 版面：**8 列 × 4 欄**，每格 **400 × 600 px**（整張 **1600 × 4800 px**），透明背景，空手（球拍由程式畫）。
+- 列 = 相對鏡頭的面向，由上而下：
+  0 背對鏡頭（朝畫面上方）、1 右後（背對、偏右）、2 面向畫面右、3 右前（面向鏡頭、偏右）、
+  4 面向鏡頭、5 左前、6 面向畫面左、7 左後。
+- 欄 = 走路格：0 站立、1 右腳前、2 雙腳併攏（過渡）、3 左腳前。程式循環 1→2→3→2。
+- 每格人物腳底對齊格子底緣中央，人物高度約 560 px，八個方向的身高與腳位置一致，切換時才不會跳動。
+- 風格與現有 `player_*_front/back.png` 一致（同一個角色、同一套配色）。
+
+俯視的 8 方向由程式旋轉 `player_*_top.png` 完成，不需另外畫；若要俯視也有腳步，另交 ART-11 的 `player_*_top_walk.png`。
+
+放進 `public/assets/` 後程式自動啟用（manifest 已有 `playerA8dir` / `playerB8dir`）。
+
 ## 交付檢查清單
 
 - [ ] 檔名與 `public/assets/manifest.json` 完全一致（小寫、底線）

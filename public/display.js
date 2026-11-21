@@ -364,7 +364,7 @@ function walkState(side, p, g) {
     if (w.phase % Math.PI < 0.3) w.phase = Math.ceil(w.phase / Math.PI) * Math.PI;
   }
   const k = Math.sin(w.phase);
-  return { moving, bob: Math.abs(k) * 0.05, sway: k * 0.06, legK: k };
+  return { moving, bob: Math.abs(k) * 0.05, sway: k * 0.06, legK: k, phase: w.phase };
 }
 function drawDust(now) {
   for (let i = dust.length - 1; i >= 0; i--) {
@@ -375,31 +375,58 @@ function drawDust(now) {
   }
 }
 
+// 依方向與走路格選擇精靈圖。優先順序：8 方向 sheet → 走路 sheet（前/後）→ 單張前/後圖（近似）
+// 8 方向 sheet：8 列（相對鏡頭方向 0~7，0 背對鏡頭、順時針）× 4 格（0 站、1 右腳前、2 併攏、3 左腳前）
+function pickSprite(side, sf, swinging, frame, top) {
+  if (top) {
+    const sheet = assets[`player${side}TopWalk`];
+    if (sheet && frame) { const cw = sheet.width / 4; return { img: sheet, sx: cw * frame, sy: 0, sw: cw, sh: sheet.height, flip: false }; }
+    const img = assets[`player${side}Top`];
+    return img ? { img, sx: 0, sy: 0, sw: img.width, sh: img.height, flip: false } : null;
+  }
+  const sheet8 = assets[`player${side}8dir`];
+  if (sheet8 && !swinging) {
+    const cw = sheet8.width / 4, ch = sheet8.height / 8;
+    return { img: sheet8, sx: cw * frame, sy: ch * sf, sw: cw, sh: ch, flip: false };
+  }
+  // 近似：背對鏡頭（7,0,1）用背面圖；面向鏡頭（3,4,5）用正面圖；側向（2,6）用正面圖並左右翻轉其一
+  const back = sf === 7 || sf === 0 || sf === 1;
+  const sideways = sf === 2 || sf === 6;
+  const base = `player${side}${back ? 'Back' : 'Front'}`;
+  const walkSheet = assets[`${base}Walk`];
+  if (walkSheet && frame && !swinging) {
+    const cw = walkSheet.width / 4;
+    return { img: walkSheet, sx: cw * frame, sy: 0, sw: cw, sh: walkSheet.height, flip: sideways && sf === 6 };
+  }
+  const img = (swinging && assets[`${base}Swing`]) || assets[base];
+  return img ? { img, sx: 0, sy: 0, sw: img.width, sh: img.height, flip: sideways && sf === 6 } : null;
+}
+
 function drawPlayer(side) {
   const p = state.players[side];
   const g = proj.ground(p.x, p.y);
   const color = COLORS[side];
   const swinging = p.swingAnim > 0;
   const wk = walkState(side, p, g);
-  // 近 / 遠：決定用背面或正面圖
-  let img = null;
-  if (proj.type === 'top') img = assets[`player${side}Top`];
-  else {
-    const near = (viewSide === 'A' && side === 'A') || (viewSide === 'B' && side === 'B');
-    const base = `player${side}${near ? 'Back' : 'Front'}`;
-    img = (swinging && assets[`${base}Swing`]) || assets[base];
-  }
-  if (img) {
-    const h = 1.9 * g.s; // 身高約 1.9m
-    const w = h * (img.width / img.height);
+  // 8 方向：玩家座標的 facing 轉成「相對鏡頭」的方向（0 背對鏡頭、2 面向螢幕右、4 面向鏡頭、6 面向螢幕左）
+  const near = (viewSide === 'A' && side === 'A') || (viewSide === 'B' && side === 'B');
+  const facing = p.facing || 0;
+  const sf = proj.type === 'top' ? facing : (near ? facing : (12 - facing) % 8);
+  const walkFrame = wk.moving ? [1, 2, 3, 2][Math.floor(wk.phase / (Math.PI / 2)) % 4] : 0;
+  const spr = pickSprite(side, sf, swinging, walkFrame, proj.type === 'top');
+  if (spr) {
+    const { img, sx, sy, sw, sh, flip } = spr;
     if (proj.type === 'top') {
+      // 俯視：圖面朝上 = 面向球網，依 facing 再轉 45° 的倍數
       const sz = 1.4 * g.s * (1 + wk.bob * 0.6);
-      ctx.save(); ctx.translate(g.x, g.y); ctx.rotate((side === 'A' ? Math.PI / 2 : -Math.PI / 2) + wk.sway * 1.5);
-      ctx.drawImage(img, -sz / 2, -sz / 2, sz, sz); ctx.restore();
+      const base = side === 'A' ? Math.PI / 2 : -Math.PI / 2;
+      ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(base + facing * Math.PI / 4 + wk.sway * 1.5);
+      ctx.drawImage(img, sx, sy, sw, sh, -sz / 2, -sz / 2, sz, sz); ctx.restore();
     } else {
-      // 以腳底為軸心：走路時上下起伏、左右小幅搖擺
+      const h = 1.9 * g.s, w = h * (sw / sh);
       ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(wk.sway);
-      ctx.drawImage(img, -w / 2, -h - wk.bob * g.s, w, h);
+      if (flip) ctx.scale(-1, 1);
+      ctx.drawImage(img, sx, sy, sw, sh, -w / 2, -h - wk.bob * g.s, w, h);
       ctx.restore();
     }
     if (!p.connected) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(g.x - 0.6 * g.s, g.y - 2 * g.s, 1.2 * g.s, 2 * g.s); }

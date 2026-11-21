@@ -54,6 +54,8 @@ export class Game {
       speed: 7,     // 自動跑位速度 m/s
       move: { x: 0, y: 0, t: -10 }, // 手機姿態控制的移動輸入（x: 右為正, y: 朝球網為正）
       head: null, // 拍頭方向單位向量 { r, f, u }（玩家座標：右/前/上），無感測器時為 null
+      facing: 0,  // 面向（8 方向，玩家座標）：0 前(朝球網) 1 右前 2 右 3 右後 4 後 5 左後 6 左 7 左前
+      facingHold: 0,
     };
   }
 
@@ -338,6 +340,8 @@ export class Game {
 
     if (this.phase === 'point' || this.phase === 'gameover') {
       this.phaseTimer -= dt;
+      this.autoMove(dt, false);
+      this.updateFacing(dt);
       if (this.ball && this.ball.inPlay === false && this.ball.z > 0) {
         // 讓球自然落地
         this.integrateBall(dt, false);
@@ -364,12 +368,14 @@ export class Game {
         this.event('autoserve', srv, '自動發球');
       }
       this.autoMove(dt);
+      this.updateFacing(dt);
       return;
     }
 
     // rally
     this.integrateBall(dt, true);
     this.autoMove(dt);
+    this.updateFacing(dt);
 
     // 揮拍緩衝：球進區時補判定
     for (const side of SIDES) {
@@ -450,7 +456,7 @@ export class Game {
   }
 
   // 球員移動：手機姿態有輸入時手動移動；沒有輸入時自動跑向球（輔助）
-  autoMove(dt) {
+  autoMove(dt, assist = true) {
     const b = this.ball;
     for (const side of SIDES) {
       const p = this.players[side];
@@ -461,17 +467,23 @@ export class Game {
       const manual = !this.bot[side] && (mv.x !== 0 || mv.y !== 0) && this.time - mv.t < 0.6;
       if (manual) {
         const spd = 4.5; // 正常速度（輸入 0.5 時為慢走 2.25 m/s）
+        // 量化成 8 方向：兩軸都有輸入時取較大的檔位、斜向以 1/√2 正規化，斜走不會比直走快
+        let mx = mv.x, my = mv.y;
+        if (mx !== 0 && my !== 0) {
+          const mag = Math.max(Math.abs(mx), Math.abs(my)) / Math.SQRT2;
+          mx = Math.sign(mx) * mag; my = Math.sign(my) * mag;
+        }
         // x：以球員自己的右手邊為正（A 面向 +y 右邊是 +x；B 相反）；y：朝球網為正
         const dir = -sign(side);
-        p.x = clamp(p.x + mv.x * dir * spd * dt, -HALF_W - 2.5, HALF_W + 2.5);
-        const ny = p.y + mv.y * dir * spd * dt;
+        p.x = clamp(p.x + mx * dir * spd * dt, -HALF_W - 2.5, HALF_W + 2.5);
+        const ny = p.y + my * dir * spd * dt;
         // 限制在自己半場：離網 1.5m 到底線後 3.5m
         const minAbs = 1.5, maxAbs = HALF_L + 3.5;
         p.y = sign(side) * clamp(Math.abs(ny) * (Math.sign(ny) === sign(side) || ny === 0 ? 1 : 0) || minAbs, minAbs, maxAbs);
         continue;
       }
       let targetX = p.x, targetY = p.y;
-      if (serving) continue;
+      if (serving || !assist) continue;
       targetX = 0; targetY = baseY;
       if (b) {
         const towardMe = Math.sign(b.vy) === sign(side) && Math.abs(b.vy) > 0.01;
@@ -493,6 +505,24 @@ export class Game {
       const step = p.speed * dt;
       if (d <= step) { p.x = targetX; p.y = targetY; }
       else { p.x += dx / d * step; p.y += dy / d * step; }
+    }
+  }
+
+  // 更新 8 方向面向：移動中 = 位移方向；停下 0.4 秒後回到面向球網
+  updateFacing(dt) {
+    for (const side of SIDES) {
+      const p = this.players[side];
+      const spd = this.playerSpeed(p);
+      if (spd > 0.4) {
+        const dir = -sign(side); // 玩家座標：右 = dir * x，前 = dir * y
+        const rx = (p.x - p._px) * dir, fy = (p.y - p._py) * dir;
+        const ang = Math.atan2(rx, fy); // 0 = 前，順時針為正
+        p.facing = ((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8;
+        p.facingHold = 0.4;
+      } else if (p.facingHold > 0) {
+        p.facingHold -= dt;
+        if (p.facingHold <= 0) p.facing = 0;
+      }
     }
   }
 
@@ -535,7 +565,7 @@ export class Game {
     const manual = (p.move.x !== 0 || p.move.y !== 0) && this.time - p.move.t < 0.6;
     const head = p.head ? [round(p.head.r, 2), round(p.head.f, 2), round(p.head.u, 2)] : null;
     const swing = p.lastSwing ? [round(p.lastSwing.plane, 2), round(p.lastSwing.dirX, 2)] : null;
-    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual, head, swing, spd: round(this.playerSpeed(p), 2) };
+    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual, head, swing, spd: round(this.playerSpeed(p), 2), facing: p.facing };
   }
 }
 
