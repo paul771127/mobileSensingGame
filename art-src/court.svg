@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="2800" viewBox="0 0 1500 2800">
+<defs></defs>
+<rect x="0" y="0" width="1500" height="2800" rx="0" fill="#1d4a9a" stroke="none" stroke-width="1"/>
+<rect x="201.5" y="211.5" width="1097" height="2377" rx="0" fill="#2f6fdd" stroke="none" stroke-width="1"/>
+<path d="M201.5 211.5H1298.5V2588.5H201.5Z M338.5 211.5V2588.5 M1161.5 211.5V2588.5 M338.5 760H1161.5 M338.5 2040H1161.5 M750 760V2040" fill="none" stroke="#ffffff" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M750 211.5v30 M750 2588.5v-30" fill="none" stroke="#ffffff" stroke-width="5"/>
+</svg>
