@@ -195,18 +195,23 @@ export class Game {
   //   plane:   -1..1   揮拍平面（負=由上往下劈、正=由下往上撈）
   //   spin:    -1..1   手腕翻轉（正=上旋、負=下旋）
   // }
+  normalizeSwing(swing) {
+    const num = (v, def) => (Number.isFinite(v) ? v : def);
+    return {
+      strength: clamp(num(swing?.strength, 0.6), 0, 1),
+      dirX: clamp(num(swing?.dirX, 0), -1, 1),
+      face: clamp(num(swing?.face, 0), -1, 1),
+      loft: clamp(num(swing?.loft, 0), -1, 1),
+      plane: clamp(num(swing?.plane, 0), -1, 1),
+      spin: clamp(num(swing?.spin, 0), -1, 1),
+      t: this.time,
+    };
+  }
+
   swing(side, swing) {
     const p = this.players[side];
     p.swingAnim = 0.35;
-    const s = {
-      strength: clamp(swing.strength ?? 0.6, 0, 1),
-      dirX: clamp(swing.dirX ?? 0, -1, 1),
-      face: clamp(swing.face ?? 0, -1, 1),
-      loft: clamp(swing.loft ?? 0, -1, 1),
-      plane: clamp(swing.plane ?? 0, -1, 1),
-      spin: clamp(swing.spin ?? 0, -1, 1),
-      t: this.time,
-    };
+    const s = this.normalizeSwing(swing);
     if (this.tryHit(side, s)) return true;
     // 揮早了：緩衝 0.25 秒，球進入擊球區時再判定
     this.pendingSwing[side] = s;
@@ -266,6 +271,11 @@ export class Game {
     let vz = (0.5 * G * t * t - b.z) / t;
     vz += arc > 0 ? arc * 2.4 : arc * 0.9; // 揮拍平面／拍面仰角抬高或壓低弧線
     vz += s.spin * -0.8;                  // 上旋再壓一點
+    if (![vx, vy, vz].every(Number.isFinite)) {
+      console.error('hitBall produced non-finite velocity', { s, b: { x: b.x, y: b.y, z: b.z }, targetX, targetY });
+      this.startServe(this.server);
+      return;
+    }
     b.vx = vx; b.vy = vy; b.vz = vz;
     b.spin = s.spin;
     b.lastHitBy = side;
@@ -290,6 +300,11 @@ export class Game {
     }
     if (this.phase === 'lobby') return;
     this.updateBots();
+    if (this.ball && ![this.ball.x, this.ball.y, this.ball.z, this.ball.vx, this.ball.vy, this.ball.vz].every(Number.isFinite)) {
+      console.error('ball state corrupted, restarting serve', this.ball);
+      this.startServe(this.server);
+      return;
+    }
 
     if (this.phase === 'point' || this.phase === 'gameover') {
       this.phaseTimer -= dt;
@@ -315,7 +330,7 @@ export class Game {
       if (this.pendingSwing[srv] && this.time - this.pendingSwing[srv].t < 0.25) {
         this.hitBall(srv, this.pendingSwing[srv], true);
       } else if (this.phaseTimer <= 0) {
-        this.hitBall(srv, { strength: 0.55, dirX: (Math.random() - 0.5) * 0.6, spin: 0, t: this.time }, true);
+        this.hitBall(srv, this.normalizeSwing({ strength: 0.55, dirX: (Math.random() - 0.5) * 0.6 }), true);
         this.event('autoserve', srv, '自動發球');
       }
       this.autoMove(dt);

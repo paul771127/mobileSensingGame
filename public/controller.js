@@ -13,6 +13,9 @@ let vibrate = true;
 let sensIdx = 1; // 0 低 1 中 2 高
 const SENS = [{ label: '低', th: 22 }, { label: '中', th: 15 }, { label: '高', th: 10 }];
 let lastState = null;
+// 這支手機的固定識別碼：重連時接回原本的位置
+let cid = null;
+try { cid = localStorage.getItem('cid'); if (!cid) { cid = Math.random().toString(36).slice(2, 12); localStorage.setItem('cid', cid); } } catch { cid = Math.random().toString(36).slice(2, 12); }
 
 $('room').value = room;
 if (side) $('sideSel').querySelector(`[data-side="${side}"]`)?.classList.add('on');
@@ -23,7 +26,7 @@ $('sideSel').querySelectorAll('button').forEach((b) => {
 // ---------- 連線 ----------
 const ws = connect(onMessage, () => {
   $('conn').textContent = '已連線';
-  if (joined) ws.send({ type: 'join', role: 'controller', room, side: mySide || side, name: $('name').value });
+  if (joined) ws.send({ type: 'join', role: 'controller', room, side: mySide || side, name: $('name').value, cid });
 });
 
 function onMessage(msg) {
@@ -90,7 +93,7 @@ $('go').onclick = async () => {
   $('joinMsg').textContent = '';
   await enableMotion(); // 需要在使用者點擊中呼叫（iOS）
   joined = true;
-  ws.send({ type: 'join', role: 'controller', room, side, name: $('name').value });
+  ws.send({ type: 'join', role: 'controller', room, side, name: $('name').value, cid });
 };
 $('leave').onclick = () => { joined = false; mySide = null; location.href = '/controller'; };
 
@@ -268,7 +271,7 @@ document.addEventListener('visibilitychange', () => {
   if (!joined) return;
   if (document.visibilityState === 'visible') {
     requestWakeLock();
-    ws.send({ type: 'join', role: 'controller', room, side: mySide, name: $('name').value });
+    ws.send({ type: 'join', role: 'controller', room, side: mySide, name: $('name').value, cid });
   } else {
     ws.send({ type: 'leave' });
   }

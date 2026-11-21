@@ -146,9 +146,20 @@ function handleMessage(ws, msg) {
         r.displays.add(ws);
         safeSend(ws, JSON.stringify({ type: 'joined', role: 'display', room: r.code, hosts: lanAddresses(), port: PORT, secure: isSecure }));
       } else {
+        const cid = typeof msg.cid === 'string' ? msg.cid.slice(0, 40) : null;
+        // 同一支手機重連：踢掉舊連線、接回原位
+        for (const sd of ['A', 'B']) {
+          const old = r.controllers[sd];
+          if (old && old !== ws && cid && old.meta.cid === cid) {
+            r.controllers[sd] = null; old.meta.room = null; old.meta.role = null; old.meta.side = null;
+            try { old.terminate(); } catch { /* ignore */ }
+            if (!msg.side) msg.side = sd;
+          }
+        }
         let side = msg.side;
         if (!side || r.controllers[side]) side = !r.controllers.A ? 'A' : !r.controllers.B ? 'B' : null;
         if (!side) return safeSend(ws, JSON.stringify({ type: 'error', code: 'full', text: '房間已滿' }));
+        ws.meta.cid = cid;
         r.controllers[side] = ws;
         ws.meta.side = side;
         const name = String(msg.name || '').slice(0, 12) || undefined;
@@ -218,8 +229,13 @@ setInterval(() => {
   const doSend = sendAccum >= 1 / SEND_HZ;
   if (doSend) sendAccum = 0;
   for (const [code, room] of rooms) {
-    room.game.update(dt);
-    if (doSend) room.broadcast({ type: 'state', state: room.game.snapshot() });
+    try {
+      room.game.update(dt);
+      if (doSend) room.broadcast({ type: 'state', state: room.game.snapshot() });
+    } catch (e) {
+      console.error(`room ${code} update error, resetting match`, e);
+      try { room.game.resetMatch(); } catch { rooms.delete(code); }
+    }
     if (room.isEmpty() && now - room.lastActivity > 10 * 60 * 1000) rooms.delete(code);
   }
 }, 1000 / TICK_HZ);
@@ -260,6 +276,9 @@ function scoreInterface(name, ip) {
   if (/^192\.168\.(56|99|188|52)\.1$|\.1$/.test(ip)) score -= 15;    // 常見虛擬網卡閘道位址
   return score;
 }
+
+process.on('uncaughtException', (e) => console.error('uncaughtException', e));
+process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
 
 server.listen(PORT, () => {
   const proto = isSecure ? 'https' : 'http';
