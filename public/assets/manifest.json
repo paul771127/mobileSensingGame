@@ -21,7 +21,13 @@
     "logo": "logo.png",
     "hitFlash": "fx_hit_flash.png",
     "controllerRacket": "ui_racket.png",
-    "controllerSwingGuide": "ui_swing_guide.png"
+    "controllerSwingGuide": "ui_swing_guide.png",
+    "playerABackWalk": "player_a_back_walk.png",
+    "playerAFrontWalk": "player_a_front_walk.png",
+    "playerATopWalk": "player_a_top_walk.png",
+    "playerBBackWalk": "player_b_back_walk.png",
+    "playerBFrontWalk": "player_b_front_walk.png",
+    "playerBTopWalk": "player_b_top_walk.png"
   },
   "sounds": {
     "hit": "sfx_hit.mp3",
