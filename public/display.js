@@ -58,8 +58,16 @@ function handleEvents(s) {
   if (ev && ev.t !== lastEventT) {
     lastEventT = ev.t;
     if (ev.type === 'hit') {
-      const label = { perfect: 'PERFECT!', good: 'GOOD', late: '勉強打到' }[ev.text] || ev.text;
-      banner = { text: label, until: performance.now() + 700, color: COLORS[ev.side], small: true };
+      let label = { perfect: 'PERFECT!', good: 'GOOD', late: '勉強打到' }[ev.text] || ev.text;
+      const sh = s.lastShot;
+      if (sh && sh.t === ev.t) {
+        const tags = [];
+        if (sh.arc > 0.35) tags.push('挑高'); else if (sh.arc < -0.35) tags.push('壓平');
+        if (sh.lateral > 0.4) tags.push('切右'); else if (sh.lateral < -0.4) tags.push('切左');
+        if (sh.spin > 0.4) tags.push('上旋'); else if (sh.spin < -0.4) tags.push('下旋');
+        if (tags.length) label += '  ' + tags.join(' ');
+      }
+      banner = { text: label, until: performance.now() + 800, color: COLORS[ev.side], small: true };
     } else if (ev.type === 'point' || ev.type === 'serve' || ev.type === 'pause' || ev.type === 'autoserve') {
       banner = { text: ev.text, until: performance.now() + (ev.type === 'point' ? 2000 : 1400), color: ev.side ? COLORS[ev.side] : COLORS.accent };
     }

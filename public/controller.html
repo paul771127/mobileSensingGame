@@ -40,6 +40,7 @@
 <section id="join" class="screen on">
   <h1 style="margin:0">🎾 手機球拍</h1>
   <p class="muted">輸入電視畫面上的房號，或掃 QR code</p>
+  <p class="muted" style="font-size:13px;max-width:320px">加入時請把手機像球拍一樣直立握著、螢幕朝自己、<b>正對電視</b>，這個方向會成為拍面的基準。</p>
   <input id="room" class="code" maxlength="4" placeholder="ABCD" autocomplete="off" autocapitalize="characters">
   <input id="name" class="code" style="font-size:18px;letter-spacing:0;width:220px" maxlength="12" placeholder="你的名字（選填）">
   <div id="sideSel">
@@ -62,9 +63,12 @@
     <div id="status">準備</div>
     <div id="sub"></div>
     <div id="meter"><i></i></div>
+    <div id="shot" class="muted" style="font-size:13px;min-height:18px"></div>
+    <div id="face" class="muted" style="font-size:13px;min-height:18px"></div>
   </div>
   <div id="bottom">
     <button id="tapswing" class="btn">👆 點一下也可以揮拍</button>
+    <button id="calib" class="btn secondary">校正拍面方向</button>
     <button id="mirror" class="btn secondary">左右鏡像：關</button>
     <button id="sens" class="btn secondary">靈敏度：中</button>
     <button id="vib" class="btn secondary">震動：開</button>

@@ -35,6 +35,7 @@ export class Game {
     this.phaseTimer = 0;
     this.pendingSwing = { A: null, B: null }; // 揮拍緩衝（允許稍早揮）
     this.lastFx = null; // 音效/特效事件 { type, t, x, y }
+    this.lastShot = null; // 最近一次擊球的參數（顯示/除錯用）
     this.time = 0;
   }
 
@@ -96,6 +97,7 @@ export class Game {
       bounces: 0,
       bounceSide: null,
       inPlay: false,
+      spin: 0,
     };
     this.phaseTimer = 3.0;
     this.event('serve', side, `${p.name} 發球`);
@@ -144,13 +146,23 @@ export class Game {
   }
 
   // ---------- 揮拍 ----------
-  // swing = { strength: 0..1, dirX: -1..1, spin: -1..1 }
+  // swing = {
+  //   strength: 0..1   揮拍速度（加速度峰值）
+  //   dirX:    -1..1   揮動方向（左/右）
+  //   face:    -1..1   拍面開合角（手機 yaw 相對校正方向；負=朝左、正=朝右）
+  //   loft:    -1..1   拍面仰角（手機前後傾；正=拍面朝上）
+  //   plane:   -1..1   揮拍平面（負=由上往下劈、正=由下往上撈）
+  //   spin:    -1..1   手腕翻轉（正=上旋、負=下旋）
+  // }
   swing(side, swing) {
     const p = this.players[side];
     p.swingAnim = 0.35;
     const s = {
       strength: clamp(swing.strength ?? 0.6, 0, 1),
       dirX: clamp(swing.dirX ?? 0, -1, 1),
+      face: clamp(swing.face ?? 0, -1, 1),
+      loft: clamp(swing.loft ?? 0, -1, 1),
+      plane: clamp(swing.plane ?? 0, -1, 1),
       spin: clamp(swing.spin ?? 0, -1, 1),
       t: this.time,
     };
@@ -184,12 +196,24 @@ export class Game {
     // 時機品質：球離球員理想擊球點 (前方 0.6m) 的誤差
     const dy = (b.y - p.y) * dir;
     const timingErr = clamp((dy - 0.6) / 1.2, -1, 1); // -1 太晚, +1 太早
-    const speed = (serving ? 15 : 13) + s.strength * 13; // 13~28 m/s
+
+    // 弧線因子：揮拍平面為主、拍面仰角次之、手腕翻轉再次之。正 = 挑高/撈球，負 = 壓平/殺球
+    const arc = clamp(s.plane * 0.6 + s.loft * 0.3 + -s.spin * 0.25, -1, 1);
+    // 左右：拍面角度為主（開拍面往外切），揮動方向為輔
+    const lateralIn = clamp(s.face * 0.65 + s.dirX * 0.45, -1.2, 1.2);
+
+    let speed = (serving ? 15 : 13) + s.strength * 13; // 13~28 m/s
+    speed *= 1 - 0.22 * Math.max(0, arc);   // 挑高較慢
+    speed *= 1 + 0.12 * Math.max(0, -arc);  // 殺球較快
+
     // 目標落點深度（距球網），力道越大越深；時機差會打太深（出界）或太淺（掛網）
-    let depth = 4.5 + s.strength * 6.0 + timingErr * 2.0 + s.spin * -1.0;
+    // 挑高：稍深一點；壓平：更深更快（但弧線低，時機差就掛網）
+    let depth = 4.5 + s.strength * 6.0 + timingErr * 2.0 + (arc > 0 ? arc * 1.0 : -arc * 1.8);
     depth = clamp(depth, 1.0, 14.5);
     const targetY = dir * depth;
-    const lateral = s.dirX * (2.5 + s.strength * 1.6) + timingErr * 1.2 * -dir;
+    // 時機太晚：球會往慣用手反方向偏（dir 修正讓 A/B 對稱）
+    // lateralIn 的正值 = 球員自己的右手邊；A 面向 +y 時右邊是 +x，B 面向 -y 時右邊是 -x
+    const lateral = lateralIn * dir * (2.5 + s.strength * 1.6) + timingErr * 1.2 * -dir;
     const targetX = clamp(b.x + lateral * 1.2, -HALF_W - 0.9, HALF_W + 0.9);
 
     const dxT = targetX - b.x, dyT = targetY - b.y;
@@ -199,8 +223,10 @@ export class Game {
     const vx = dxT / t, vy = dyT / t;
     // 拋物線落在目標：z0 + vz t - 0.5 g t^2 = 0 → vz
     let vz = (0.5 * G * t * t - b.z) / t;
-    vz += s.spin * -1.2 * (s.spin > 0 ? 1 : 0.6); // 上旋壓低、下旋/挑高抬高
+    vz += arc > 0 ? arc * 2.4 : arc * 0.9; // 揮拍平面／拍面仰角抬高或壓低弧線
+    vz += s.spin * -0.8;                  // 上旋再壓一點
     b.vx = vx; b.vy = vy; b.vz = vz;
+    b.spin = s.spin;
     b.lastHitBy = side;
     b.bounces = 0;
     b.bounceSide = null;
@@ -211,6 +237,7 @@ export class Game {
     const q = Math.abs(timingErr) < 0.3 ? 'perfect' : Math.abs(timingErr) < 0.7 ? 'good' : 'late';
     this.event('hit', side, q);
     this.fx('hit', b.x, b.y);
+    this.lastShot = { side, strength: round(s.strength, 2), arc: round(arc, 2), lateral: round(lateralIn, 2), spin: round(s.spin, 2), timing: round(timingErr, 2), t: this.time };
   }
 
   // ---------- 每幀更新 ----------
@@ -298,8 +325,11 @@ export class Game {
     // 落地
     if (b.z <= 0) {
       b.z = 0;
-      b.vz = -b.vz * 0.62;
-      b.vx *= 0.85; b.vy *= 0.85;
+      const spin = b.spin || 0;
+      // 上旋：落地後彈得低、往前竄；下旋：彈得高一點、速度被吃掉
+      b.vz = -b.vz * (0.62 - 0.15 * spin);
+      const keep = 0.85 + 0.12 * spin;
+      b.vx *= keep; b.vy *= keep;
       this.fx('bounce', b.x, b.y);
       const landSide = b.y < 0 ? 'A' : 'B';
       const inX = Math.abs(b.x) <= HALF_W + 0.03;
@@ -380,6 +410,7 @@ export class Game {
       rallyHits: this.rallyHits,
       lastEvent: this.lastEvent,
       lastFx: this.lastFx,
+      lastShot: this.lastShot,
     };
   }
 
