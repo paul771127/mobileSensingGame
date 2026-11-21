@@ -194,9 +194,11 @@ let headVec = null, lastPoseSent = 0, lastPose = null;
 function sendPose(force = false) {
   if (!joined || !headVec) return;
   const now = performance.now();
-  if (!force && now - lastPoseSent < 100) return;
+  // 揮拍中（含揮完 0.45 秒）每 25ms 回報一次，讓畫面上的球拍跟著實際軌跡走；平時 100ms
+  const fast = swinging || now - lastSwingAt < 450 || (swingStart && now - swingStart < 450);
+  if (!force && now - lastPoseSent < (fast ? 25 : 100)) return;
   const h = headVec;
-  if (!force && lastPose && Math.abs(h.r - lastPose.r) < 0.03 && Math.abs(h.f - lastPose.f) < 0.03 && Math.abs(h.u - lastPose.u) < 0.03) return;
+  if (!force && !fast && lastPose && Math.abs(h.r - lastPose.r) < 0.03 && Math.abs(h.f - lastPose.f) < 0.03 && Math.abs(h.u - lastPose.u) < 0.03) return;
   lastPose = { ...h }; lastPoseSent = now;
   ws.send({ type: 'pose', r: +h.r.toFixed(3), f: +h.f.toFixed(3), u: +h.u.toFixed(3) });
 }

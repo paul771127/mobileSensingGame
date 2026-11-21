@@ -396,16 +396,29 @@ function playerToWorld(side, r, f, u) {
   return { x: r * dir, y: f * dir, z: u };
 }
 
+const headSmooth = { A: null, B: null, tA: 0, tB: 0 };
 function drawRacket(side, p, swinging, bodyH) {
-  let h = Array.isArray(p.head) ? { r: p.head[0], f: p.head[1], u: p.head[2] } : null;
-  if (swinging) {
-    // 橫掃：從身體右後方掃到左前方（以玩家自己的左右為準）
-    const k = 1 - p.swingAnim / 0.35; // 0→1
-    const ang = -0.9 + k * 2.2;
-    h = { r: Math.cos(ang) * 0.95, f: Math.sin(ang) * 0.6 + 0.3, u: 0.25 };
-  } else if (!h) {
-    h = { r: 0.5, f: 0.35, u: 0.8 }; // 沒有姿態資料時的預設準備姿勢
+  // 目標拍頭方向：有手機姿態就用真實資料（揮拍時也是），沒有才用揮拍參數推算的軌跡
+  let target = Array.isArray(p.head) ? { r: p.head[0], f: p.head[1], u: p.head[2] } : null;
+  if (!target) {
+    if (swinging) {
+      const k = 1 - p.swingAnim / 0.35; // 0→1
+      const plane = p.swing ? p.swing[0] : 0;  // 正=由下往上撈，負=由上往下劈
+      const ang = -0.9 + k * 2.2;
+      target = { r: Math.cos(ang) * 0.95, f: Math.sin(ang) * 0.6 + 0.3, u: 0.25 + plane * (k - 0.5) * 1.6 };
+    } else target = { r: 0.5, f: 0.35, u: 0.8 };
   }
+  // 平滑插值（揮拍時跟得快一點）
+  const now = performance.now();
+  const prev = headSmooth[side], dt = Math.min(0.1, (now - (headSmooth['t' + side] || now)) / 1000);
+  headSmooth['t' + side] = now;
+  let h;
+  if (!prev) h = { ...target };
+  else {
+    const a = 1 - Math.exp(-dt * (swinging ? 30 : 14));
+    h = { r: prev.r + (target.r - prev.r) * a, f: prev.f + (target.f - prev.f) * a, u: prev.u + (target.u - prev.u) * a };
+  }
+  headSmooth[side] = h;
   const n = Math.hypot(h.r, h.f, h.u) || 1;
   const hv = playerToWorld(side, h.r / n, h.f / n, h.u / n);
   const handLocal = playerToWorld(side, 0.3, 0.1, 0);

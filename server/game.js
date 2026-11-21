@@ -227,6 +227,7 @@ export class Game {
     const p = this.players[side];
     p.swingAnim = 0.35;
     const s = this.normalizeSwing(swing);
+    p.lastSwing = { plane: s.plane, dirX: s.dirX, t: this.time };
     if (this.tryHit(side, s)) return true;
     // 揮早了：緩衝 0.25 秒，球進入擊球區時再判定
     this.pendingSwing[side] = s;
@@ -509,7 +510,8 @@ export class Game {
     const p = this.players[side];
     const manual = (p.move.x !== 0 || p.move.y !== 0) && this.time - p.move.t < 0.6;
     const head = p.head ? [round(p.head.r, 2), round(p.head.f, 2), round(p.head.u, 2)] : null;
-    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual, head };
+    const swing = p.lastSwing ? [round(p.lastSwing.plane, 2), round(p.lastSwing.dirX, 2)] : null;
+    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual, head, swing };
   }
 }
 
