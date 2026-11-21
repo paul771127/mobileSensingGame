@@ -251,7 +251,7 @@ function updateMove() {
 // 加速度大小超過門檻→進入揮拍→低於門檻或超時後送出一次 swing。
 // 揮拍期間累積：峰值、橫向加速度、陀螺儀，以及「加速階段」的加速度向量（用來算揮拍平面）。
 let swinging = false, peak = 0, swingStart = 0, lastSwingAt = 0;
-let accX = 0, rotY = 0, rotX = 0, samples = 0;
+let accX = 0, rotY = 0, rotX = 0, rotZ = 0, samples = 0;
 let vSum = { x: 0, y: 0, z: 0 }, peakReached = false, swingOrient = null, swingFace = 0, swingLoft = 0;
 let gyroAvail = false;
 let debugAcc = 0, lastPlane = 0;
@@ -269,7 +269,7 @@ function onMotion(e) {
   if (!swinging) {
     if (mag > th && now - lastSwingAt > 350) {
       swinging = true; swingStart = now; peak = mag; peakReached = false;
-      accX = a.x; rotY = rr?.gamma ?? 0; rotX = rr?.beta ?? 0; samples = 1;
+      accX = a.x; rotY = rr?.gamma ?? 0; rotX = rr?.beta ?? 0; rotZ = rr?.alpha ?? 0; samples = 1;
       vSum = { x: a.x, y: a.y, z: a.z };
       swingOrient = orient; swingFace = faceDeg; swingLoft = loftDeg; // 以揮拍開始時的拍面為準
     }
@@ -277,25 +277,27 @@ function onMotion(e) {
     if (mag > peak) { peak = mag; }
     else if (!peakReached && mag < peak * 0.8) { peakReached = true; }
     if (!peakReached) { vSum.x += a.x; vSum.y += a.y; vSum.z += a.z; }
-    accX += a.x; rotY += rr?.gamma ?? 0; rotX += rr?.beta ?? 0; samples++;
+    accX += a.x; rotY += rr?.gamma ?? 0; rotX += rr?.beta ?? 0; rotZ += rr?.alpha ?? 0; samples++;
     const dur = now - swingStart;
     if ((mag < th * 0.5 && dur > 60) || dur > 220) {
       swinging = false; lastSwingAt = now;
-      emitSwing(peak, accX / samples, rotY / samples, rotX / samples);
+      emitSwing(peak, accX / samples, rotY / samples, rotX / samples, rotZ / samples);
       if (moveX || moveY) { moveX = 0; moveY = 0; ws.send({ type: 'move', x: 0, y: 0 }); $('moveInd').textContent = ''; lastMoveMsg = ''; }
     }
   }
   if (now % 10 < 1) updateDebug();
 }
 
-function emitSwing(peakMag, meanAx, meanGy, meanGx) {
+function emitSwing(peakMag, meanAx, meanGy, meanGx, meanGz) {
   // 力道：門檻以上到 ~55 m/s² 線性映射（輕揮 = 短球，全力才到底線）
   const th = SENS[sensIdx].th;
   const strength = clamp((peakMag - th) / (55 - th), 0.05, 1);
   // 揮動方向：陀螺儀繞手機長軸(gamma)，否則用橫向加速度
   let dirX = gyroAvail ? clamp(-meanGy / 250, -1, 1) : clamp(meanAx / 15, -1, 1);
-  // 手腕翻轉(beta)：往下壓 = 上旋(正)，往上甩 = 下旋/挑(負)
-  const spin = gyroAvail ? clamp(meanGx / 300, -1, 1) : 0;
+  // 手腕翻轉(beta)：往下壓 = 上旋(正)，往上甩 = 下旋/挑(負)。門檻外線性放大，旋球要明顯
+  const spin = gyroAvail ? spinCurve(meanGx / 200) : 0;
+  // 繞螢幕法線轉(alpha)：像削球那樣側向刷 = 側旋
+  let curve = gyroAvail ? spinCurve(meanGz / 220) : 0;
   // 拍面角度：±45° 對應 ±1；拍面仰角：±40° 對應 ±1
   let face = orient ? clamp(swingFace / 45, -1, 1) : 0;
   const loft = orient ? clamp(swingLoft / 40, -1, 1) : 0;
@@ -310,9 +312,15 @@ function emitSwing(peakMag, meanAx, meanGy, meanGx) {
     const ang = Math.atan2(wz, horiz) / DEG; // +90 = 垂直往上
     plane = clamp(ang / 60, -1, 1);
   }
-  if (mirror) { dirX = -dirX; face = -face; }
+  if (mirror) { dirX = -dirX; face = -face; curve = -curve; }
   lastPlane = plane;
-  sendSwing({ strength, dirX, face, loft, plane, spin });
+  sendSwing({ strength, dirX, face, loft, plane, spin, curve });
+}
+// 小動作忽略（±0.15 以內視為沒旋），之後線性到 1
+function spinCurve(v) {
+  const a = Math.abs(v);
+  if (a < 0.15) return 0;
+  return Math.sign(v) * clamp((a - 0.15) / 0.6, 0, 1);
 }
 
 function sendSwing(s) {
@@ -324,6 +332,7 @@ function sendSwing(s) {
   if (s.face > 0.3) tags.push('拍面朝右'); else if (s.face < -0.3) tags.push('拍面朝左');
   if (s.loft > 0.4) tags.push('開拍面');
   if (s.spin > 0.4) tags.push('上旋'); else if (s.spin < -0.4) tags.push('下旋');
+  if (s.curve > 0.4) tags.push('側旋 ↪'); else if (s.curve < -0.4) tags.push('側旋 ↩');
   $('shot').textContent = `力道 ${Math.round(s.strength * 100)}%${tags.length ? ' · ' + tags.join(' · ') : ''}`;
 }
 
@@ -336,15 +345,15 @@ tap.addEventListener('pointerup', (e) => {
   const strength = clamp(0.4 + held / 1200, 0.4, 1);
   const rect = tap.getBoundingClientRect();
   const dirX = clamp(((e.clientX - rect.left) / rect.width - 0.5) * 2, -1, 1) * (mirror ? -1 : 1);
-  sendSwing({ strength, dirX, face: 0, loft: 0, plane: 0, spin: 0 });
+  sendSwing({ strength, dirX, face: 0, loft: 0, plane: 0, spin: 0, curve: 0 });
 });
 const KEYMOVE = { KeyA: [-1, 0], KeyD: [1, 0], KeyW: [0, 1], KeyS: [0, -1] };
 addEventListener('keyup', (e) => { if (joined && KEYMOVE[e.code]) ws.send({ type: 'move', x: 0, y: 0 }); });
 addEventListener('keydown', (e) => {
   if (!joined) return;
   if (KEYMOVE[e.code]) { e.preventDefault(); ws.send({ type: 'move', x: KEYMOVE[e.code][0], y: KEYMOVE[e.code][1] }); return; }
-  const k = { Space: {}, ArrowUp: { plane: 0.8 }, ArrowDown: { plane: -0.8 }, ArrowLeft: { face: -0.7 }, ArrowRight: { face: 0.7 } }[e.code];
-  if (k) { e.preventDefault(); sendSwing({ strength: 0.6, dirX: 0, face: 0, loft: 0, plane: 0, spin: 0, ...k }); }
+  const k = { Space: {}, ArrowUp: { plane: 0.8 }, ArrowDown: { plane: -0.8 }, ArrowLeft: { face: -0.7 }, ArrowRight: { face: 0.7 }, KeyZ: { spin: 1 }, KeyX: { spin: -1 }, KeyQ: { curve: -1 }, KeyE: { curve: 1 } }[e.code];
+  if (k) { e.preventDefault(); sendSwing({ strength: 0.6, dirX: 0, face: 0, loft: 0, plane: 0, spin: 0, curve: 0, ...k }); }
 });
 $('calib').onclick = calibrate;
 $('botBtn').onclick = () => ws.send({ type: 'bot', side: mySide === 'A' ? 'B' : 'A', on: true });

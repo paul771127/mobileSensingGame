@@ -11,6 +11,8 @@ export const COURT = {
 };
 
 const G = 9.8;
+const TOPSPIN_ACC = 6.0;  // 上旋 = 1 時額外向下加速度 m/s²（下旋為向上，球會飄）
+const CURVE_ACC = 4.5;    // 側旋 = 1 時的側向加速度 m/s²
 const HALF_L = COURT.length / 2;
 const HALF_W = COURT.singlesWidth / 2;
 
@@ -153,7 +155,7 @@ export class Game {
       bounces: 0,
       bounceSide: null,
       inPlay: false,
-      spin: 0,
+      spin: 0, curve: 0, ax: 0,
     };
     this.phaseTimer = 3.0;
     this.event('serve', side, `${p.name} 發球`);
@@ -209,6 +211,7 @@ export class Game {
   //   loft:    -1..1   拍面仰角（手機前後傾；正=拍面朝上）
   //   plane:   -1..1   揮拍平面（負=由上往下劈、正=由下往上撈）
   //   spin:    -1..1   手腕翻轉（正=上旋、負=下旋）
+  //   curve:   -1..1   側旋（正=往自己右邊彎）
   // }
   normalizeSwing(swing) {
     const num = (v, def) => (Number.isFinite(v) ? v : def);
@@ -219,6 +222,7 @@ export class Game {
       loft: clamp(num(swing?.loft, 0), -1, 1),
       plane: clamp(num(swing?.plane, 0), -1, 1),
       spin: clamp(num(swing?.spin, 0), -1, 1),
+      curve: clamp(num(swing?.curve, 0), -1, 1),
       t: this.time,
     };
   }
@@ -260,7 +264,7 @@ export class Game {
     const timingErr = clamp((dy - 0.7) / 1.5, -1, 1); // -1 太晚, +1 太早
 
     // 弧線因子：揮拍平面為主、拍面仰角次之、手腕翻轉再次之。正 = 挑高/撈球，負 = 壓平/殺球
-    const arc = clamp(s.plane * 0.6 + s.loft * 0.3 + -s.spin * 0.25, -1, 1);
+    const arc = clamp(s.plane * 0.6 + s.loft * 0.3, -1, 1); // 旋球的高低改由飛行中的馬格努斯力呈現
     // 左右：拍面角度為主（開拍面往外切），揮動方向為輔
     const lateralIn = clamp(s.face * 0.65 + s.dirX * 0.45, -1.2, 1.2);
 
@@ -278,17 +282,23 @@ export class Game {
     const lateral = lateralIn * dir * (2.5 + s.strength * 1.6) + timingErr * 1.2 * -dir;
     const targetX = clamp(b.x + lateral * 1.2, -HALF_W - 0.9, HALF_W + 0.9);
 
-    const dxT = targetX - b.x, dyT = targetY - b.y;
-    const dist = Math.hypot(dxT, dyT);
-    // 短球：水平速度放慢，拋物線自然變高，才放得到網前而不掛網
+    // 側旋：側向加速度（以球員右手邊為正）。瞄準點反向補償一半，讓球「彎進來」但仍大致落在目標
+    const ax = s.curve * CURVE_ACC * dir;
+    const dxT0 = targetX - b.x, dyT0 = targetY - b.y;
+    const dist0 = Math.hypot(dxT0, dyT0);
     const shortK = clamp(0.5 + depth * 0.055, 0.5, 1);
-    const horiz = Math.max(speed * shortK * (0.75 + 0.25 * (1 - Math.abs(s.spin))), 5.5);
+    const horiz = Math.max(speed * shortK * (0.75 + 0.25 * (1 - Math.abs(s.spin) * 0.5)), 5.5);
+    const tEst = dist0 / horiz;
+    const curvedTargetX = clamp(targetX - 0.5 * ax * tEst * tEst * 0.5, -HALF_W - 1.2, HALF_W + 1.2);
+    const dxT = curvedTargetX - b.x, dyT = targetY - b.y;
+    const dist = Math.hypot(dxT, dyT);
     const t = dist / horiz;
     const vx = dxT / t, vy = dyT / t;
-    // 拋物線落在目標：z0 + vz t - 0.5 g t^2 = 0 → vz
-    let vz = (0.5 * G * t * t - b.z) / t;
+    // 以「有效重力」解拋物線：上旋在空中多一個向下加速度 → 出手要更高、飛行中明顯下墜；
+    // 下旋相反 → 出手較平、飛行中飄。落點仍大致在目標
+    const gEff = G + s.spin * TOPSPIN_ACC;
+    let vz = (0.5 * gEff * t * t - b.z) / t;
     vz += arc > 0 ? arc * 2.4 : arc * 0.9; // 揮拍平面／拍面仰角抬高或壓低弧線
-    vz += s.spin * -0.8;                  // 上旋再壓一點
     if (![vx, vy, vz].every(Number.isFinite)) {
       console.error('hitBall produced non-finite velocity', { s, b: { x: b.x, y: b.y, z: b.z }, targetX, targetY });
       this.startServe(this.server);
@@ -296,6 +306,8 @@ export class Game {
     }
     b.vx = vx; b.vy = vy; b.vz = vz;
     b.spin = s.spin;
+    b.curve = s.curve;
+    b.ax = ax;
     b.lastHitBy = side;
     b.bounces = 0;
     b.bounceSide = null;
@@ -306,7 +318,7 @@ export class Game {
     const q = Math.abs(timingErr) < 0.3 ? 'perfect' : Math.abs(timingErr) < 0.7 ? 'good' : 'late';
     this.event('hit', side, q);
     this.fx('hit', b.x, b.y);
-    this.lastShot = { side, strength: round(s.strength, 2), arc: round(arc, 2), lateral: round(lateralIn, 2), spin: round(s.spin, 2), timing: round(timingErr, 2), t: this.time };
+    this.lastShot = { side, strength: round(s.strength, 2), arc: round(arc, 2), lateral: round(lateralIn, 2), spin: round(s.spin, 2), curve: round(s.curve, 2), timing: round(timingErr, 2), t: this.time };
   }
 
   // ---------- 每幀更新 ----------
@@ -371,7 +383,10 @@ export class Game {
   integrateBall(dt, judge) {
     const b = this.ball;
     const prevY = b.y, prevZ = b.z;
-    b.vz -= G * dt;
+    // 馬格努斯效應：上旋往下壓、下旋飄；側旋側向彎。落地後旋轉大幅衰減
+    const spinK = b.bounces === 0 ? 1 : 0.3;
+    b.vz -= (G + (b.spin || 0) * TOPSPIN_ACC * spinK) * dt;
+    b.vx += (b.ax || 0) * spinK * dt;
     b.x += b.vx * dt;
     b.y += b.vy * dt;
     b.z += b.vz * dt;
@@ -401,10 +416,11 @@ export class Game {
     if (b.z <= 0) {
       b.z = 0;
       const spin = b.spin || 0;
-      // 上旋：落地後彈得低、往前竄；下旋：彈得高一點、速度被吃掉
-      b.vz = -b.vz * (0.62 - 0.15 * spin);
-      const keep = 0.85 + 0.12 * spin;
+      // 上旋：彈得高、往前竄（速度幾乎不掉）；下旋：彈得低、速度被吃掉（滑行）
+      b.vz = Math.min(-b.vz * clamp(0.62 + 0.18 * spin, 0.3, 0.85), 6.5);
+      const keep = clamp(0.85 + 0.17 * spin, 0.55, 1.02);
       b.vx *= keep; b.vy *= keep;
+      b.spin = spin * 0.5; // 旋轉衰減
       this.fx('bounce', b.x, b.y);
       const landSide = b.y < 0 ? 'A' : 'B';
       const LINE = 0.12; // 壓線算進：球半徑約 0.033 + 線寬 0.05 再寬鬆一點
@@ -490,6 +506,7 @@ export class Game {
         x: round(this.ball.x), y: round(this.ball.y), z: round(this.ball.z),
         vx: round(this.ball.vx), vy: round(this.ball.vy), vz: round(this.ball.vz),
         lastHitBy: this.ball.lastHitBy, bounces: this.ball.bounces,
+        spin: round(this.ball.spin || 0, 2), curve: round(this.ball.curve || 0, 2),
       } : null,
       players: {
         A: this.playerSnap('A'),
