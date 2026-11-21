@@ -208,7 +208,7 @@ export class Game {
       t: this.time,
     };
     if (this.tryHit(side, s)) return true;
-    // 揮早了：緩衝 0.18 秒，球進入擊球區時再判定
+    // 揮早了：緩衝 0.25 秒，球進入擊球區時再判定
     this.pendingSwing[side] = s;
     return false;
   }
@@ -217,7 +217,7 @@ export class Game {
     const b = this.ball, p = this.players[side];
     if (!b) return false;
     const dy = (b.y - p.y) * -sign(side); // 球在球員前方多少（朝球網方向為正）
-    return dy > -0.6 && dy < 1.8 && Math.abs(b.x - p.x) < 1.6 && b.z < 2.8;
+    return dy > -0.8 && dy < 2.2 && Math.abs(b.x - p.x) < 1.8 && b.z < 2.8;
   }
 
   tryHit(side, s) {
@@ -236,14 +236,14 @@ export class Game {
     const dir = -sign(side); // 往對方打
     // 時機品質：球離球員理想擊球點 (前方 0.6m) 的誤差
     const dy = (b.y - p.y) * dir;
-    const timingErr = clamp((dy - 0.6) / 1.2, -1, 1); // -1 太晚, +1 太早
+    const timingErr = clamp((dy - 0.7) / 1.5, -1, 1); // -1 太晚, +1 太早
 
     // 弧線因子：揮拍平面為主、拍面仰角次之、手腕翻轉再次之。正 = 挑高/撈球，負 = 壓平/殺球
     const arc = clamp(s.plane * 0.6 + s.loft * 0.3 + -s.spin * 0.25, -1, 1);
     // 左右：拍面角度為主（開拍面往外切），揮動方向為輔
     const lateralIn = clamp(s.face * 0.65 + s.dirX * 0.45, -1.2, 1.2);
 
-    let speed = (serving ? 15 : 13) + s.strength * 13; // 13~28 m/s
+    let speed = (serving ? 12 : 11) + s.strength * 10; // 11~21 m/s（慢一點比較看得清楚）
     speed *= 1 - 0.22 * Math.max(0, arc);   // 挑高較慢
     speed *= 1 + 0.12 * Math.max(0, -arc);  // 殺球較快
 
@@ -259,7 +259,7 @@ export class Game {
 
     const dxT = targetX - b.x, dyT = targetY - b.y;
     const dist = Math.hypot(dxT, dyT);
-    const horiz = Math.max(speed * (0.75 + 0.25 * (1 - Math.abs(s.spin))), 8);
+    const horiz = Math.max(speed * (0.75 + 0.25 * (1 - Math.abs(s.spin))), 7);
     const t = dist / horiz;
     const vx = dxT / t, vy = dyT / t;
     // 拋物線落在目標：z0 + vz t - 0.5 g t^2 = 0 → vz
@@ -312,7 +312,7 @@ export class Game {
       if (b.z < 1.2) { b.z = 1.2; b.vz = 3.2; }
       this.phaseTimer -= dt;
       const srv = this.server;
-      if (this.pendingSwing[srv] && this.time - this.pendingSwing[srv].t < 0.18) {
+      if (this.pendingSwing[srv] && this.time - this.pendingSwing[srv].t < 0.25) {
         this.hitBall(srv, this.pendingSwing[srv], true);
       } else if (this.phaseTimer <= 0) {
         this.hitBall(srv, { strength: 0.55, dirX: (Math.random() - 0.5) * 0.6, spin: 0, t: this.time }, true);
@@ -330,7 +330,7 @@ export class Game {
     for (const side of SIDES) {
       const ps = this.pendingSwing[side];
       if (!ps) continue;
-      if (this.time - ps.t > 0.18) { this.pendingSwing[side] = null; continue; }
+      if (this.time - ps.t > 0.25) { this.pendingSwing[side] = null; continue; }
       if (this.tryHit(side, ps)) break;
     }
   }
@@ -439,7 +439,7 @@ export class Game {
       ball: this.ball ? {
         x: round(this.ball.x), y: round(this.ball.y), z: round(this.ball.z),
         vx: round(this.ball.vx), vy: round(this.ball.vy), vz: round(this.ball.vz),
-        lastHitBy: this.ball.lastHitBy,
+        lastHitBy: this.ball.lastHitBy, bounces: this.ball.bounces,
       } : null,
       players: {
         A: this.playerSnap('A'),

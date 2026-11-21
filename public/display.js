@@ -306,6 +306,7 @@ function drawScene() {
   const now = performance.now();
   // 外插球位置（補 30Hz 更新間的空隙）
   let ball = null;
+  if (!s.ball) trail.length = 0;
   if (s.ball) {
     const dt = Math.min((now - stateAt) / 1000, 0.06);
     ball = { x: s.ball.x + s.ball.vx * dt, y: s.ball.y + s.ball.vy * dt, z: Math.max(0, s.ball.z + s.ball.vz * dt) };
@@ -317,11 +318,12 @@ function drawScene() {
   for (const f of fxList) items.push({ kind: 'fx', ...f });
   items.sort((a, b) => proj.p(a.x, a.y, 0).zc - proj.p(b.x, b.y, 0).zc).reverse();
 
+  drawLandingMarker(s.ball);
   // 球影先畫
   if (ball) {
     const g = proj.ground(ball.x, ball.y);
     const sh = assets.ballShadow;
-    const r = 0.11 * g.s * (1 + ball.z * 0.15);
+    const r = Math.max(H * 0.008, 0.14 * g.s) * (1 + ball.z * 0.15);
     if (sh) ctx.drawImage(sh, g.x - r * 1.6, g.y - r * 0.8, r * 3.2, r * 1.6);
     else { ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(g.x, g.y, r * 1.5, r * 0.7, 0, 0, Math.PI * 2); ctx.fill(); }
   }
@@ -381,16 +383,58 @@ function drawPlayer(side) {
   ctx.fillText(p.name + (p.connected ? '' : '（離線）'), g.x, g.y - (proj.type === 'top' ? 0.6 * g.s : bodyH + 0.4 * g.s));
 }
 
+// 球的視覺半徑：放大到好看見（電視隔遠也看得到），最小為畫面高度的 1.1%
+function ballRadius(p, z) {
+  const base = 0.16 * p.s * (proj.type === 'top' ? 1 + z * 0.12 : 1);
+  return Math.max(H * 0.011, base);
+}
+
+const trail = []; // 拖尾
 function drawBall(b) {
   const p = proj.p(b.x, b.y, b.z);
-  const r = Math.max(4, 0.11 * p.s * (proj.type === 'top' ? 1 + b.z * 0.12 : 1));
+  const r = ballRadius(p, b.z);
+  const now = performance.now();
+  trail.push({ x: p.x, y: p.y, r, t: now });
+  while (trail.length && now - trail[0].t > 220) trail.shift();
+  for (const t of trail) {
+    const k = 1 - (now - t.t) / 220;
+    ctx.fillStyle = `rgba(217,255,74,${0.28 * k})`;
+    ctx.beginPath(); ctx.arc(t.x, t.y, t.r * (0.5 + 0.5 * k), 0, Math.PI * 2); ctx.fill();
+  }
   const img = assets.ball;
   if (img) ctx.drawImage(img, p.x - r, p.y - r, r * 2, r * 2);
   else {
     ctx.fillStyle = COLORS.accent; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = Math.max(1, r * 0.15);
-    ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.65, 0.4, 2.2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = Math.max(1.5, r * 0.18);
+    ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.62, 0.4, 2.2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = Math.max(1, r * 0.1);
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.stroke();
   }
+}
+
+// 預測落點：解 z + vz t - g/2 t² = 0
+function predictLanding(b) {
+  const g = 9.8, a = -0.5 * g, bb = b.vz, c = b.z;
+  const disc = bb * bb - 4 * a * c;
+  if (disc < 0) return null;
+  const t = (-bb - Math.sqrt(disc)) / (2 * a);
+  if (!(t > 0.05)) return null;
+  return { x: b.x + b.vx * t, y: b.y + b.vy * t, t };
+}
+
+function drawLandingMarker(sb) {
+  if (!sb || state.phase !== 'rally' || sb.bounces > 0) return;
+  const land = predictLanding(sb);
+  if (!land) return;
+  const g = proj.ground(land.x, land.y);
+  const side = land.y < 0 ? 'A' : 'B';
+  const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 120);
+  const r = Math.max(H * 0.012, 0.35 * g.s) * pulse;
+  ctx.save();
+  ctx.strokeStyle = COLORS[side]; ctx.lineWidth = Math.max(2, r * 0.18); ctx.globalAlpha = 0.85;
+  ctx.beginPath(); ctx.ellipse(g.x, g.y, r, r * (proj.type === 'top' ? 1 : 0.45), 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.globalAlpha = 0.25; ctx.fillStyle = COLORS[side]; ctx.fill();
+  ctx.restore();
 }
 
 function drawFx(f, now) {

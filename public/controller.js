@@ -61,7 +61,7 @@ function renderState(s) {
       const p = s.players[mySide];
       const dist = Math.abs(b.y - p.y);
       const eta = Math.abs(b.vy) > 0.1 ? dist / Math.abs(b.vy) : 9;
-      sub = eta < 0.35 ? '現在揮！' : eta < 1.0 ? '準備…' : '';
+      sub = eta < 0.45 ? '現在揮！' : eta < 1.2 ? '準備…' : '';
       $('meter').firstChild.style.width = `${Math.max(0, 100 - eta * 60)}%`;
     } else $('meter').firstChild.style.width = '0%';
   }
@@ -263,7 +263,18 @@ let wakeLock = null;
 async function requestWakeLock() {
   try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* ignore */ }
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && joined) requestWakeLock(); });
+// 切到背景 = 離線；回到前景 = 自動重新加入。關閉頁面也立刻通知伺服器。
+document.addEventListener('visibilitychange', () => {
+  if (!joined) return;
+  if (document.visibilityState === 'visible') {
+    requestWakeLock();
+    ws.send({ type: 'join', role: 'controller', room, side: mySide, name: $('name').value });
+  } else {
+    ws.send({ type: 'leave' });
+  }
+});
+addEventListener('pagehide', () => { if (joined) ws.send({ type: 'leave' }); });
+setInterval(() => { if (joined && document.visibilityState === 'visible') ws.send({ type: 'ping', t: Date.now() }); }, 2000);
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 

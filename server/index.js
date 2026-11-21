@@ -115,11 +115,13 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
   ws.meta = { room: null, role: null, side: null };
   ws.isAlive = true;
+  ws.lastSeen = Date.now();
   ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
+    ws.lastSeen = Date.now();
     try { handleMessage(ws, msg); } catch (e) { console.error('message error', e); }
   });
 
@@ -173,6 +175,11 @@ function handleMessage(ws, msg) {
       room.broadcast({ type: 'players', players: { A: room.game.players.A.connected, B: room.game.players.B.connected } });
       break;
     }
+    case 'leave': {
+      // 手機切到背景 / 關閉頁面：立刻視為離線，但保留 socket，回前景再 join
+      leave(ws);
+      break;
+    }
     case 'reset': {
       if (!room) return;
       room.game.resetMatch();
@@ -217,14 +224,16 @@ setInterval(() => {
   }
 }, 1000 / TICK_HZ);
 
-// 心跳
+// 心跳：5 秒一次協定層 ping；控制器另外要求 10 秒內有應用層訊息（手機每 2 秒 ping），否則視為死連線
 setInterval(() => {
+  const now = Date.now();
   for (const ws of wss.clients) {
     if (ws.isAlive === false) { ws.terminate(); continue; }
+    if (ws.meta?.role === 'controller' && now - ws.lastSeen > 10000) { ws.terminate(); continue; }
     ws.isAlive = false;
     try { ws.ping(); } catch { /* ignore */ }
   }
-}, 15000);
+}, 5000);
 
 // 列出區網 IPv4，把實體 Wi-Fi / 乙太網路排前面，虛擬介面（VMware、Hyper-V、WSL、Docker、Tailscale…）排後面
 function lanAddresses() {
