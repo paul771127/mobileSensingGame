@@ -87,7 +87,7 @@ function handleEvents(s) {
         if (tags.length) label += '  ' + tags.join(' ');
       }
       banner = { text: label, until: performance.now() + 800, color: COLORS[ev.side], small: true };
-    } else if (ev.type === 'point' || ev.type === 'serve' || ev.type === 'pause' || ev.type === 'autoserve') {
+    } else if (ev.type === 'point' || ev.type === 'serve' || ev.type === 'pause' || ev.type === 'autoserve' || ev.type === 'bot') {
       banner = { text: ev.text, until: performance.now() + (ev.type === 'point' ? 2000 : 1400), color: ev.side ? COLORS[ev.side] : COLORS.accent };
     }
   }
@@ -472,6 +472,10 @@ function drawLobby() {
       ctx.font = `700 ${fs * 0.6}px system-ui`;
       ctx.fillText(`${side}：${p.connected ? p.name + ' 已加入' : '等待中…'}`, W / 2 + dir * boxW * 0.28, y + boxH - fs * 0.9);
     }
+    if (state.players.A.connected !== state.players.B.connected) {
+      ctx.fillStyle = '#9aa3c7'; ctx.font = `${fs * 0.45}px system-ui`;
+      ctx.fillText('只有一支手機？在手機上按「和電腦練習」，或在此按 B 鍵', W / 2, y + boxH - fs * 0.35);
+    }
   }
   ctx.textBaseline = 'alphabetic';
 }
@@ -495,6 +499,7 @@ function drawBanner() {
 addEventListener('keydown', (e) => {
   if (e.key === 'f' || e.key === 'F') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); }
   if (e.key === 'r' || e.key === 'R') ws.send({ type: 'reset' });
+  if (e.key === 'b' || e.key === 'B') { const side = state?.players?.A?.connected ? 'B' : 'A'; ws.send({ type: 'bot', side, on: true }); }
 });
 document.querySelectorAll('#view button').forEach((b) => {
   const on = () => document.querySelectorAll('#view button').forEach((x) => x.classList.toggle('on', x.dataset.side === viewSide));

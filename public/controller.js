@@ -50,6 +50,7 @@ function renderState(s) {
   $('games').textContent = `局數 ${s.score.games.A} - ${s.score.games.B}`;
   const other = mySide === 'A' ? 'B' : 'A';
   let text = '', sub = '';
+  $('botBtn').style.display = (s.phase === 'lobby' && !s.players[other].connected) ? '' : 'none';
   if (s.phase === 'lobby') { text = '等待對手'; sub = s.players[other].connected ? '' : '請另一支手機加入 ' + other + ' 方'; }
   else if (s.phase === 'serve') { text = s.server === mySide ? '你發球：揮拍！' : '對手發球'; sub = s.server === mySide ? '三秒內沒揮會自動發球' : ''; }
   else if (s.phase === 'rally') {
@@ -245,6 +246,7 @@ addEventListener('keydown', (e) => {
   if (k) { e.preventDefault(); sendSwing({ strength: 0.6, dirX: 0, face: 0, loft: 0, plane: 0, spin: 0, ...k }); }
 });
 $('calib').onclick = calibrate;
+$('botBtn').onclick = () => ws.send({ type: 'bot', side: mySide === 'A' ? 'B' : 'A', on: true });
 
 $('mirror').onclick = () => { mirror = !mirror; $('mirror').textContent = `左右鏡像：${mirror ? '開' : '關'}`; };
 $('sens').onclick = () => { sensIdx = (sensIdx + 1) % SENS.length; $('sens').textContent = `靈敏度：${SENS[sensIdx].label}`; };

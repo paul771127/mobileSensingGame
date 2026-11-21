@@ -36,6 +36,8 @@ export class Game {
     this.pendingSwing = { A: null, B: null }; // 揮拍緩衝（允許稍早揮）
     this.lastFx = null; // 音效/特效事件 { type, t, x, y }
     this.lastShot = null; // 最近一次擊球的參數（顯示/除錯用）
+    this.bot = { A: false, B: false }; // 電腦玩家（單人練習）
+    this.botNextSwing = 0;
     this.time = 0;
   }
 
@@ -54,8 +56,10 @@ export class Game {
   // ---------- 連線 ----------
   setConnected(side, connected, name) {
     const p = this.players[side];
+    if (connected) this.bot[side] = false; // 真人加入就取代電腦
     p.connected = connected;
     if (name) p.name = name;
+    else if (connected) p.name = side === 'A' ? '玩家 A' : '玩家 B';
     if (this.bothReady() && this.phase === 'lobby') this.startServe(this.server);
     if (!this.bothReady() && this.phase !== 'lobby') {
       this.phase = 'lobby';
@@ -66,6 +70,43 @@ export class Game {
 
   bothReady() {
     return this.players.A.connected && this.players.B.connected;
+  }
+
+  // 單人練習：讓某一方由電腦操作
+  setBot(side, on) {
+    this.bot[side] = on;
+    const p = this.players[side];
+    if (on) { p.connected = true; p.name = '電腦'; p.speed = 9; }
+    else { p.connected = false; p.name = side === 'A' ? '玩家 A' : '玩家 B'; p.speed = 7; }
+    if (this.bothReady() && this.phase === 'lobby') this.startServe(this.server);
+    if (!this.bothReady() && this.phase !== 'lobby') { this.phase = 'lobby'; this.ball = null; }
+    this.event(on ? 'bot' : 'pause', side, on ? '電腦加入練習' : '電腦離開');
+  }
+
+  updateBots() {
+    for (const side of SIDES) {
+      if (!this.bot[side] || !this.ball) continue;
+      const serving = this.phase === 'serve' && this.server === side;
+      const b = this.ball;
+      const towardMe = this.phase === 'rally' && Math.sign(b.vy) === sign(side);
+      if (!serving && !towardMe) continue;
+      if (this.time < this.botNextSwing) continue;
+      // 發球：等 1 秒再揮；回球：球進擊球區且離理想擊球點夠近才揮
+      if (serving && this.phaseTimer > 2.0) continue;
+      if (!this.inHitZone(side)) continue;
+      const p = this.players[side];
+      const dy = (b.y - p.y) * -sign(side);
+      if (!serving && dy > 1.1) continue; // 太早
+      this.botNextSwing = this.time + 0.5;
+      this.swing(side, {
+        strength: 0.45 + Math.random() * 0.3,
+        dirX: 0,
+        face: (Math.random() - 0.5) * 0.9,
+        loft: 0,
+        plane: (Math.random() - 0.5) * 0.5,
+        spin: 0,
+      });
+    }
   }
 
   event(type, side, text) {
@@ -248,6 +289,7 @@ export class Game {
       if (p.swingAnim > 0) p.swingAnim = Math.max(0, p.swingAnim - dt);
     }
     if (this.phase === 'lobby') return;
+    this.updateBots();
 
     if (this.phase === 'point' || this.phase === 'gameover') {
       this.phaseTimer -= dt;
@@ -416,7 +458,7 @@ export class Game {
 
   playerSnap(side) {
     const p = this.players[side];
-    return { connected: p.connected, name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim) };
+    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim) };
   }
 }
 

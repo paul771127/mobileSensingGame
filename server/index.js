@@ -164,6 +164,15 @@ function handleMessage(ws, msg) {
       safeSend(ws, JSON.stringify({ type: 'swing_ack', hit, quality: hit ? room.game.lastEvent?.text : null }));
       break;
     }
+    case 'bot': {
+      // { type:'bot', side:'A'|'B', on:true|false }  讓空位由電腦代打
+      if (!room) return;
+      const side = msg.side === 'A' || msg.side === 'B' ? msg.side : null;
+      if (!side || room.controllers[side]) return; // 有真人就不給電腦
+      room.game.setBot(side, msg.on !== false);
+      room.broadcast({ type: 'players', players: { A: room.game.players.A.connected, B: room.game.players.B.connected } });
+      break;
+    }
     case 'reset': {
       if (!room) return;
       room.game.resetMatch();
