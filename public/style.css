@@ -1,0 +1,20 @@
+:root {
+  --bg: #0b1020;
+  --panel: #141b33;
+  --text: #f3f5ff;
+  --muted: #9aa3c7;
+  --accent: #d9ff4a;   /* 網球黃綠 */
+  --a: #3aa0ff;        /* 玩家 A 藍 */
+  --b: #ff5f6d;        /* 玩家 B 紅 */
+  --court: #2f6fdd;
+  --court-out: #1d4a9a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif; }
+button { font: inherit; }
+.btn { background: var(--accent); color: #111; border: 0; border-radius: 14px; padding: 16px 24px; font-size: 20px; font-weight: 700; cursor: pointer; }
+.btn.secondary { background: var(--panel); color: var(--text); border: 1px solid #2a3560; }
+.btn:disabled { opacity: .5; }
+.muted { color: var(--muted); }
+.center { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; min-height: 100%; padding: 24px; text-align: center; }
+input.code { font-size: 36px; letter-spacing: .3em; text-transform: uppercase; text-align: center; width: 220px; padding: 10px; border-radius: 12px; border: 1px solid #2a3560; background: var(--panel); color: var(--text); }

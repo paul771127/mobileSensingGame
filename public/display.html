@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>手機球拍對戰 - 顯示端</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  html, body { overflow: hidden; }
+  #c { display: block; width: 100vw; height: 100vh; }
+  #hint { position: fixed; left: 12px; bottom: 10px; font-size: 12px; color: var(--muted); opacity: .8; }
+  #view { position: fixed; right: 12px; bottom: 10px; display: flex; gap: 6px; }
+  #view button { background: rgba(20,27,51,.8); color: var(--text); border: 1px solid #2a3560; border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  #view button.on { background: var(--accent); color: #111; border-color: var(--accent); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">同一房號可在多台螢幕開啟此頁；網址加 ?side=A / ?side=B / ?side=top 切換視角。按 F 全螢幕、R 重新開始。</div>
+<div id="view">
+  <button data-side="A">A 視角</button>
+  <button data-side="top">俯視</button>
+  <button data-side="B">B 視角</button>
+</div>
+<script type="module" src="/display.js"></script>
+</body>
+</html>

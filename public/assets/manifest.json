@@ -1,0 +1,31 @@
+{
+  "_comment": "美術資源清單。檔案放進 public/assets/ 後，顯示端與控制器會自動改用圖片；缺檔時用程式畫的佔位圖。規格見 docs/CODEX_ART_TICKETS.md",
+  "pixelsPerMeter": 100,
+  "images": {
+    "court": "court.png",
+    "net": "net.png",
+    "ball": "ball.png",
+    "ballShadow": "ball_shadow.png",
+    "playerATop": "player_a_top.png",
+    "playerBTop": "player_b_top.png",
+    "playerABack": "player_a_back.png",
+    "playerAFront": "player_a_front.png",
+    "playerABackSwing": "player_a_back_swing.png",
+    "playerAFrontSwing": "player_a_front_swing.png",
+    "playerBBack": "player_b_back.png",
+    "playerBFront": "player_b_front.png",
+    "playerBBackSwing": "player_b_back_swing.png",
+    "playerBFrontSwing": "player_b_front_swing.png",
+    "background": "bg_display.png",
+    "logo": "logo.png",
+    "hitFlash": "fx_hit_flash.png",
+    "controllerRacket": "ui_racket.png",
+    "controllerSwingGuide": "ui_swing_guide.png"
+  },
+  "sounds": {
+    "hit": "sfx_hit.mp3",
+    "bounce": "sfx_bounce.mp3",
+    "net": "sfx_net.mp3",
+    "point": "sfx_point.mp3"
+  }
+}

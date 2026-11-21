@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>手機球拍</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  html, body { overflow: hidden; height: 100%; touch-action: none; -webkit-user-select: none; user-select: none; }
+  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .screen { display: none; }
+  .screen.on { display: flex; }
+  #join { flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 100vh; padding: 24px; text-align: center; }
+  #play { flex-direction: column; min-height: 100vh; }
+  #top { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; font-size: 14px; color: var(--muted); }
+  #score { text-align: center; font-size: 42px; font-weight: 800; line-height: 1; }
+  #score small { display: block; font-size: 13px; color: var(--muted); font-weight: 500; margin-top: 4px; }
+  #main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 12px; text-align: center; transition: background .15s; }
+  #racket { width: 46vw; max-width: 220px; aspect-ratio: 1; display: grid; place-items: center; font-size: 110px; filter: drop-shadow(0 10px 20px rgba(0,0,0,.4)); transition: transform .12s; }
+  #racket img { width: 100%; height: 100%; object-fit: contain; }
+  #racket.swing { transform: rotate(-35deg) scale(1.08); }
+  #status { font-size: 26px; font-weight: 800; min-height: 34px; }
+  #sub { color: var(--muted); font-size: 14px; min-height: 20px; }
+  #meter { width: 70vw; max-width: 320px; height: 10px; background: #1b2242; border-radius: 6px; overflow: hidden; }
+  #meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .08s; }
+  #bottom { display: flex; gap: 10px; padding: 14px; flex-wrap: wrap; justify-content: center; }
+  #bottom .btn { padding: 12px 16px; font-size: 15px; }
+  #tapswing { width: 100%; padding: 22px; font-size: 22px; }
+  .side-A { color: var(--a); } .side-B { color: var(--b); }
+  #sideSel { display: flex; gap: 10px; }
+  #sideSel button { min-width: 110px; }
+  #sideSel button.on { outline: 3px solid var(--accent); }
+  .flash-hit { background: rgba(217,255,74,.18) !important; }
+  .flash-miss { background: rgba(255,95,109,.18) !important; }
+  #debug { position: fixed; left: 8px; bottom: 6px; font-size: 10px; color: #667; font-family: ui-monospace, monospace; white-space: pre; opacity: .7; }
+</style>
+</head>
+<body>
+
+<section id="join" class="screen on">
+  <h1 style="margin:0">🎾 手機球拍</h1>
+  <p class="muted">輸入電視畫面上的房號，或掃 QR code</p>
+  <input id="room" class="code" maxlength="4" placeholder="ABCD" autocomplete="off" autocapitalize="characters">
+  <input id="name" class="code" style="font-size:18px;letter-spacing:0;width:220px" maxlength="12" placeholder="你的名字（選填）">
+  <div id="sideSel">
+    <button class="btn secondary" data-side="A">A 方（藍）</button>
+    <button class="btn secondary" data-side="B">B 方（紅）</button>
+  </div>
+  <button id="go" class="btn">加入並開啟感測器</button>
+  <p id="joinMsg" class="muted" style="min-height:20px;font-size:14px"></p>
+</section>
+
+<section id="play" class="screen">
+  <div id="top">
+    <span id="roomLabel"></span>
+    <span id="conn">連線中…</span>
+    <button id="leave" class="btn secondary" style="padding:6px 10px;font-size:12px">離開</button>
+  </div>
+  <div id="score">0 - 0<small id="games">局數 0 - 0</small></div>
+  <div id="main">
+    <div id="racket">🎾</div>
+    <div id="status">準備</div>
+    <div id="sub"></div>
+    <div id="meter"><i></i></div>
+  </div>
+  <div id="bottom">
+    <button id="tapswing" class="btn">👆 點一下也可以揮拍</button>
+    <button id="mirror" class="btn secondary">左右鏡像：關</button>
+    <button id="sens" class="btn secondary">靈敏度：中</button>
+    <button id="vib" class="btn secondary">震動：開</button>
+  </div>
+  <div id="debug"></div>
+</section>
+
+<script type="module" src="/controller.js"></script>
+</body>
+</html>
