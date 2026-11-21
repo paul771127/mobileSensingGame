@@ -454,12 +454,13 @@ export class Game {
     const b = this.ball;
     for (const side of SIDES) {
       const p = this.players[side];
+      p._px = p.x; p._py = p.y; p._dt = dt;
       const baseY = sign(side) * (HALF_L + COURT.baselineOffset);
       const serving = this.phase === 'serve' && this.server === side;
       const mv = p.move;
       const manual = !this.bot[side] && (mv.x !== 0 || mv.y !== 0) && this.time - mv.t < 0.6;
       if (manual) {
-        const spd = 6.5;
+        const spd = 4.5; // 正常速度（輸入 0.5 時為慢走 2.25 m/s）
         // x：以球員自己的右手邊為正（A 面向 +y 右邊是 +x；B 相反）；y：朝球網為正
         const dir = -sign(side);
         p.x = clamp(p.x + mv.x * dir * spd * dt, -HALF_W - 2.5, HALF_W + 2.5);
@@ -495,6 +496,12 @@ export class Game {
     }
   }
 
+  // 這一幀的移動速度（m/s），給顯示端做走路動畫
+  playerSpeed(p) {
+    if (!p._dt) return 0;
+    return Math.hypot(p.x - (p._px ?? p.x), p.y - (p._py ?? p.y)) / p._dt;
+  }
+
   // ---------- 序列化 ----------
   snapshot() {
     return {
@@ -528,7 +535,7 @@ export class Game {
     const manual = (p.move.x !== 0 || p.move.y !== 0) && this.time - p.move.t < 0.6;
     const head = p.head ? [round(p.head.r, 2), round(p.head.f, 2), round(p.head.u, 2)] : null;
     const swing = p.lastSwing ? [round(p.lastSwing.plane, 2), round(p.lastSwing.dirX, 2)] : null;
-    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual, head, swing };
+    return { connected: p.connected, bot: this.bot[side], name: p.name, x: round(p.x), y: round(p.y), swingAnim: round(p.swingAnim), manual, head, swing, spd: round(this.playerSpeed(p), 2) };
   }
 }
 

@@ -323,6 +323,7 @@ function drawScene() {
   items.sort((a, b) => proj.p(a.x, a.y, 0).zc - proj.p(b.x, b.y, 0).zc).reverse();
 
   drawLandingMarker(s.ball);
+  drawDust(now);
   // 球影先畫
   if (ball) {
     const g = proj.ground(ball.x, ball.y);
@@ -340,11 +341,46 @@ function drawScene() {
   for (let i = fxList.length - 1; i >= 0; i--) if (now - fxList[i].start > fxList[i].dur) fxList.splice(i, 1);
 }
 
+// 走路動畫：依伺服器回報的移動速度累積步伐相位；上下起伏 + 左右搖擺 + 腳下塵土
+const walk = { A: { phase: 0, t: 0, lastStep: 0 }, B: { phase: 0, t: 0, lastStep: 0 } };
+const dust = [];
+function walkState(side, p, g) {
+  const w = walk[side];
+  const now = performance.now();
+  const dt = w.t ? Math.min(0.05, (now - w.t) / 1000) : 0;
+  w.t = now;
+  const spd = p.spd || 0;
+  const moving = spd > 0.4;
+  if (moving) {
+    w.phase += dt * spd * 4.2; // 每公尺約 0.67 步
+    const step = Math.floor(w.phase / Math.PI);
+    if (step !== w.lastStep) {
+      w.lastStep = step;
+      const foot = (step % 2 ? 1 : -1) * 0.18 * g.s;
+      dust.push({ x: g.x + foot, y: g.y, r: 0.12 * g.s, start: now, dur: 380 });
+    }
+  } else if (w.phase % Math.PI > 0.01) {
+    w.phase += dt * 6; // 停下來時把腳收回
+    if (w.phase % Math.PI < 0.3) w.phase = Math.ceil(w.phase / Math.PI) * Math.PI;
+  }
+  const k = Math.sin(w.phase);
+  return { moving, bob: Math.abs(k) * 0.05, sway: k * 0.06, legK: k };
+}
+function drawDust(now) {
+  for (let i = dust.length - 1; i >= 0; i--) {
+    const d = dust[i], k = (now - d.start) / d.dur;
+    if (k >= 1) { dust.splice(i, 1); continue; }
+    ctx.fillStyle = `rgba(255,255,255,${0.35 * (1 - k)})`;
+    ctx.beginPath(); ctx.ellipse(d.x, d.y, d.r * (1 + k * 1.5), d.r * 0.5 * (1 + k), 0, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
 function drawPlayer(side) {
   const p = state.players[side];
   const g = proj.ground(p.x, p.y);
   const color = COLORS[side];
   const swinging = p.swingAnim > 0;
+  const wk = walkState(side, p, g);
   // 近 / 遠：決定用背面或正面圖
   let img = null;
   if (proj.type === 'top') img = assets[`player${side}Top`];
@@ -357,10 +393,15 @@ function drawPlayer(side) {
     const h = 1.9 * g.s; // 身高約 1.9m
     const w = h * (img.width / img.height);
     if (proj.type === 'top') {
-      const sz = 1.4 * g.s;
-      ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(side === 'A' ? Math.PI / 2 : -Math.PI / 2);
+      const sz = 1.4 * g.s * (1 + wk.bob * 0.6);
+      ctx.save(); ctx.translate(g.x, g.y); ctx.rotate((side === 'A' ? Math.PI / 2 : -Math.PI / 2) + wk.sway * 1.5);
       ctx.drawImage(img, -sz / 2, -sz / 2, sz, sz); ctx.restore();
-    } else ctx.drawImage(img, g.x - w / 2, g.y - h, w, h);
+    } else {
+      // 以腳底為軸心：走路時上下起伏、左右小幅搖擺
+      ctx.save(); ctx.translate(g.x, g.y); ctx.rotate(wk.sway);
+      ctx.drawImage(img, -w / 2, -h - wk.bob * g.s, w, h);
+      ctx.restore();
+    }
     if (!p.connected) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(g.x - 0.6 * g.s, g.y - 2 * g.s, 1.2 * g.s, 2 * g.s); }
     drawRacket(side, p, swinging, 0);
     return;
@@ -374,7 +415,15 @@ function drawPlayer(side) {
   if (proj.type === 'top') {
     ctx.beginPath(); ctx.arc(g.x, g.y, 0.4 * g.s, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   } else {
-    roundRect(g.x - 0.3 * g.s, g.y - bodyH, 0.6 * g.s, bodyH * 0.75, 0.15 * g.s); ctx.fill(); ctx.stroke();
+    // 腳：走路時前後交替
+    const legY = g.y - bodyH * 0.25 - wk.bob * g.s, legH = bodyH * 0.25;
+    ctx.fillStyle = '#223';
+    for (const sgn of [-1, 1]) {
+      const dx = sgn * 0.12 * g.s + (wk.moving ? sgn * wk.legK * 0.12 * g.s : 0);
+      roundRect(g.x + dx - 0.07 * g.s, legY, 0.14 * g.s, legH + (wk.moving ? sgn * wk.legK * 0.06 * g.s : 0), 0.05 * g.s); ctx.fill();
+    }
+    ctx.fillStyle = p.connected ? color : '#555';
+    roundRect(g.x - 0.3 * g.s, g.y - bodyH - wk.bob * g.s, 0.6 * g.s, bodyH * 0.75, 0.15 * g.s); ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.arc(g.x, g.y - bodyH * 0.9, 0.22 * g.s, 0, Math.PI * 2); ctx.fillStyle = '#ffd9b3'; ctx.fill(); ctx.stroke();
   }
   // 球拍：依手機回報的拍頭方向在 3D 畫出來；揮拍時做橫掃動畫

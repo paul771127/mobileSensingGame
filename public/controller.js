@@ -222,20 +222,27 @@ function calibrate() {
 }
 
 // ---- 姿態 → 角色移動 ----
-// 拍頭左右傾 >30° 左右跑；往上抬 >30° 後退；往下壓 >30° 前進（可同時）。進入 30°、離開 22° 的遲滯避免抖動。
-const MOVE_ON = 30, MOVE_OFF = 22;
+// 相對校正姿勢的角度：±10° 內不動、10~20° 慢速(0.5)、20° 以上正常速度(1)。
+// 拍頭左右傾控制左右、抬高後退、壓低前進，可同時成立。帶 2° 遲滯避免在門檻附近抖動。
+const DEAD = 10, SLOW = 20, HYST = 2;
 let moveX = 0, moveY = 0, lastMoveSent = 0, lastMoveMsg = '';
-function axis(cur, val) {
-  if (cur === 0) return val > MOVE_ON ? 1 : val < -MOVE_ON ? -1 : 0;
-  return Math.abs(val) < MOVE_OFF || Math.sign(val) !== cur ? 0 : cur;
+function band(cur, val) {
+  const a = Math.abs(val), sgn = Math.sign(val);
+  const same = cur !== 0 && Math.sign(cur) === sgn;
+  const lv = same ? Math.abs(cur) : 0;
+  const tFast = SLOW - (lv >= 1 ? HYST : 0);
+  const tSlow = DEAD - (lv >= 0.5 ? HYST : 0);
+  if (a >= tFast) return sgn;
+  if (a >= tSlow) return sgn * 0.5;
+  return 0;
 }
 function updateMove() {
   if (!joined) return;
   const now = performance.now();
   // 揮拍中與揮完 0.4 秒內不算移動
   const busy = swinging || now - lastSwingAt < 400;
-  let mx = busy ? 0 : axis(moveX, tiltDelta);
-  let my = busy ? 0 : -axis(moveY, pitchDelta); // 抬高(正) → 後退(-1)；壓低 → 前進(+1)
+  let mx = busy ? 0 : band(moveX, tiltDelta);
+  let my = busy ? 0 : -band(moveY, pitchDelta); // 抬高(正) → 後退(-)；壓低 → 前進(+)
   if (mirror) mx = -mx;
   const changed = mx !== moveX || my !== moveY;
   moveX = mx; moveY = my;
@@ -243,7 +250,8 @@ function updateMove() {
     ws.send({ type: 'move', x: mx, y: my });
     lastMoveSent = now;
   }
-  const txt = (my > 0 ? '▲ 前進 ' : my < 0 ? '▼ 後退 ' : '') + (mx < 0 ? '◀ 左移' : mx > 0 ? '右移 ▶' : '');
+  const slow = (v) => (Math.abs(v) === 0.5 ? '(慢)' : '');
+  const txt = (my > 0 ? '▲ 前進' + slow(my) + ' ' : my < 0 ? '▼ 後退' + slow(my) + ' ' : '') + (mx < 0 ? '◀ 左移' + slow(mx) : mx > 0 ? '右移' + slow(mx) + ' ▶' : '');
   if (txt !== lastMoveMsg) { $('moveInd').textContent = txt; lastMoveMsg = txt; }
 }
 
