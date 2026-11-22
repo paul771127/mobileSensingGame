@@ -165,10 +165,10 @@ export class Game {
     this.players[other(side)].y = -baseY;
     // 球拋在發球者頭上，等待揮拍；超時自動發球
     this.ball = {
-      x: p.x,
-      y: p.y,
-      z: 1.2,
-      vx: 0, vy: 0, vz: 3.2,
+      x: p.x + 0.3 * -sign(side),
+      y: p.y + 0.1 * -sign(side),
+      z: 1.6,
+      vx: 0, vy: 0, vz: 3.0,
       lastHitBy: null,
       bounces: 0,
       bounceSide: null,
@@ -411,12 +411,13 @@ export class Game {
 
     const b = this.ball;
     if (this.phase === 'serve') {
-      // 球在發球者頭上上下彈跳，並跟著發球者左右移動
+      // 拋球點 = 持拍側（身體右前方，與拍頭 x/y 一致）的上方，跟著發球者移動
       const sp = this.players[this.server];
-      b.x = sp.x; b.y = sp.y;
+      const sdir = -sign(this.server);
+      b.x = sp.x + 0.3 * sdir; b.y = sp.y + 0.1 * sdir;
       b.vz -= G * dt;
       b.z += b.vz * dt;
-      if (b.z < 1.2) { b.z = 1.2; b.vz = 3.2; }
+      if (b.z < 1.6) { b.z = 1.6; b.vz = 3.0; }
       this.phaseTimer -= dt;
       const srv = this.server;
       if (this.pendingSwing[srv] && this.time - this.pendingSwing[srv].t < 0.25) {
