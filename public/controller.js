@@ -307,7 +307,7 @@ function onMotion(e) {
 
 // ---- 手機平移 → 角色位置 ----
 // 把去重力加速度轉到世界座標，再投影到玩家座標（右 / 前），積分成速度與位移。
-// 靜止時（加速度小於門檻持續 120ms）速度歸零抑制漂移；揮拍中與揮完 0.4 秒不積分；位移限制在 ±35cm。
+// 靜止時（加速度小於門檻持續 120ms）速度歸零抑制漂移；揮拍中與揮完 0.2 秒不積分加速度、只以慣性滑行；位移限制在 ±35cm。
 const TR = { v: { r: 0, f: 0 }, p: { r: 0, f: 0 }, lastT: 0, quietSince: 0, lastSent: 0, lastSentP: { r: 9, f: 9 } };
 const TR_MAX = 0.35, TR_QUIET_ACC = 0.7, TR_QUIET_MS = 120, TR_DAMP = 1.2;
 const TR_GAINS = [1, 1.5, 2, 3]; let trGainIdx = 1; // 位移倍率（積分會低估實際位移，預設 1.5x，可在手機上切換）
@@ -316,7 +316,7 @@ function integrateTranslation(a, now) {
   const dt = TR.lastT ? Math.min(0.05, (now - TR.lastT) / 1000) : 0;
   TR.lastT = now;
   if (!dt) return;
-  const busy = swinging || now - lastSwingAt < 400;
+  const busy = swinging || now - lastSwingAt < 200;
   const m = orient;
   // 裝置 → 世界（東/北/上）
   const wx = m.m11 * a.x + m.m12 * a.y + m.m13 * a.z;
@@ -326,7 +326,16 @@ function integrateTranslation(a, now) {
   const ar = wx * -Math.cos(h) + wy * Math.sin(h);
   const af = wx * -Math.sin(h) + wy * -Math.cos(h);
   const mag = Math.hypot(ar, af);
-  if (busy) { TR.v.r = 0; TR.v.f = 0; TR.quietSince = now; return; }
+  if (busy) {
+    // 揮拍中：不積分揮拍的加速度，但保留揮拍前的速度慣性滑行（逐漸減速），角色不會原地卡住
+    const gain = TR_GAINS[trGainIdx];
+    TR.v.r *= Math.max(0, 1 - 3 * dt); TR.v.f *= Math.max(0, 1 - 3 * dt);
+    TR.p.r = clamp(TR.p.r + TR.v.r * dt * gain, -TR_MAX, TR_MAX);
+    TR.p.f = clamp(TR.p.f + TR.v.f * dt * gain, -TR_MAX, TR_MAX);
+    TR.quietSince = now;
+    sendOffset(now);
+    return;
+  }
   if (mag < TR_QUIET_ACC) {
     if (!TR.quietSince) TR.quietSince = now;
     if (now - TR.quietSince > TR_QUIET_MS) { TR.v.r = 0; TR.v.f = 0; }
