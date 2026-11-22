@@ -77,7 +77,7 @@ function handleEvents(s) {
   if (ev && ev.t !== lastEventT) {
     lastEventT = ev.t;
     if (ev.type === 'hit') {
-      let label = { perfect: 'PERFECT!', good: 'GOOD', late: '勉強打到' }[ev.text] || ev.text;
+      let label = { perfect: 'PERFECT!', good: 'GOOD', late: '勉強打到', block: '擋球' }[ev.text] || ev.text;
       const sh = s.lastShot;
       if (sh && sh.t === ev.t) {
         const tags = [];

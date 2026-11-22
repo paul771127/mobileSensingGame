@@ -79,7 +79,7 @@ function flash(hit, quality) {
   const main = $('main');
   main.classList.remove('flash-hit', 'flash-miss');
   main.classList.add(hit ? 'flash-hit' : 'flash-miss');
-  $('status').textContent = hit ? ({ perfect: 'PERFECT!', good: 'GOOD!', late: '打到了' }[quality] || '打到了') : '揮空…';
+  $('status').textContent = hit ? ({ perfect: 'PERFECT!', good: 'GOOD!', late: '打到了', block: '擋球' }[quality] || '打到了') : '揮空…';
   $('sub').textContent = hit ? '' : '等球再近一點再揮';
   if (vibrate && navigator.vibrate) navigator.vibrate(hit ? [30, 20, 60] : 15);
   clearTimeout(flashTimer);
@@ -222,9 +222,9 @@ function calibrate() {
 }
 
 // ---- 姿態 → 角色移動 ----
-// 相對校正姿勢的角度：±10° 內不動、10~20° 慢速(0.5)、20° 以上正常速度(1)。
+// 相對校正姿勢的角度：±7.5° 內不動、7.5~20° 慢速(0.5)、20° 以上正常速度(1)。
 // 拍頭左右傾控制左右、抬高後退、壓低前進，可同時成立。帶 2° 遲滯避免在門檻附近抖動。
-const DEAD = 10, SLOW = 20, HYST = 2;
+const DEAD = 7.5, SLOW = 20, HYST = 2;
 let moveX = 0, moveY = 0, lastMoveSent = 0, lastMoveMsg = '';
 function band(cur, val) {
   const a = Math.abs(val), sgn = Math.sign(val);

@@ -240,6 +240,46 @@ export class Game {
     return false;
   }
 
+  // 球拍拍頭的世界座標（與顯示端畫法一致）：手在身體右前方 1.0m 高，拍長 0.68m
+  racketHeadPos(side) {
+    const p = this.players[side];
+    const dir = -sign(side); // 玩家座標 → 世界：右 = dir*x, 前 = dir*y
+    const h = p.head || { r: 0.5, f: 0.35, u: 0.8 };
+    const n = Math.hypot(h.r, h.f, h.u) || 1;
+    const hx = p.x + 0.3 * dir, hy = p.y + 0.1 * dir, hz = 1.0;
+    const L = 0.68;
+    return { x: hx + (h.r / n) * dir * L, y: hy + (h.f / n) * dir * L, z: hz + (h.u / n) * L, hr: h.r / n, hu: h.u / n };
+  }
+
+  // 不揮拍時球碰到拍面：自動以小力道擊回（像用拍面擋球 / 放短球）
+  passiveBlock(dt) {
+    if (this.phase !== 'rally' || !this.ball) return;
+    const b = this.ball;
+    for (const side of SIDES) {
+      if (this.bot[side]) continue;
+      const p = this.players[side];
+      if (!p.connected) continue;
+      if (Math.sign(b.vy) !== sign(side)) continue; // 球要朝我飛來
+      if (p.swingAnim > 0) continue;               // 正在揮拍就交給揮拍判定
+      if (this.time - (p.lastBlockT || -10) < 0.5) continue;
+      const rh = this.racketHeadPos(side);
+      const d = Math.hypot(b.x - rh.x, b.y - rh.y, b.z - rh.z);
+      if (d > 0.55) continue;
+      p.lastBlockT = this.time;
+      p.swingAnim = 0.15;
+      const s = this.normalizeSwing({
+        strength: 0.12 + Math.min(0.1, Math.hypot(b.vx, b.vy) / 200), // 幾乎只靠來球反彈：短球
+        dirX: 0,
+        face: rh.hr * 0.8,            // 拍面朝哪就往哪偏
+        loft: clamp((rh.hu - 0.5) * 1.2, -1, 1),
+        plane: 0, spin: 0, curve: 0,
+      });
+      this.hitBall(side, s, false);
+      this.event('hit', side, 'block');
+      return;
+    }
+  }
+
   inHitZone(side) {
     const b = this.ball, p = this.players[side];
     if (!b) return false;
@@ -355,7 +395,9 @@ export class Game {
 
     const b = this.ball;
     if (this.phase === 'serve') {
-      // 球在發球者頭上上下彈跳
+      // 球在發球者頭上上下彈跳，並跟著發球者左右移動
+      const sp = this.players[this.server];
+      b.x = sp.x; b.y = sp.y;
       b.vz -= G * dt;
       b.z += b.vz * dt;
       if (b.z < 1.2) { b.z = 1.2; b.vz = 3.2; }
@@ -376,6 +418,7 @@ export class Game {
     this.integrateBall(dt, true);
     this.autoMove(dt);
     this.updateFacing(dt);
+    this.passiveBlock(dt);
 
     // 揮拍緩衝：球進區時補判定
     for (const side of SIDES) {
@@ -473,6 +516,8 @@ export class Game {
           const mag = Math.max(Math.abs(mx), Math.abs(my)) / Math.SQRT2;
           mx = Math.sign(mx) * mag; my = Math.sign(my) * mag;
         }
+        // 發球時只能左右移動（選發球位置），不能前後
+        if (serving) my = 0;
         // x：以球員自己的右手邊為正（A 面向 +y 右邊是 +x；B 相反）；y：朝球網為正
         const dir = -sign(side);
         p.x = clamp(p.x + mx * dir * spd * dt, -HALF_W - 2.5, HALF_W + 2.5);
@@ -489,7 +534,9 @@ export class Game {
         const towardMe = Math.sign(b.vy) === sign(side) && Math.abs(b.vy) > 0.01;
         if (towardMe) {
           const t = Math.max(0, (p.y - b.y) / b.vy);
-          targetX = clamp(b.x + b.vx * t, -HALF_W - 1.5, HALF_W + 1.5);
+          // 讓「拍頭」對準來球，而不是身體中心：拍頭在身體右前方約 0.6m
+          const dir = -sign(side);
+          targetX = clamp(b.x + b.vx * t - 0.6 * dir, -HALF_W - 1.5, HALF_W + 1.5);
           const land = predictLanding(b);
           if (land && Math.abs(land.y) < HALF_L - 3) {
             targetY = sign(side) * clamp(Math.abs(land.y) + 1.2, 3.5, HALF_L + COURT.baselineOffset);
