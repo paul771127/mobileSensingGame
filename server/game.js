@@ -411,10 +411,9 @@ export class Game {
 
     const b = this.ball;
     if (this.phase === 'serve') {
-      // 拋球點 = 持拍側（身體右前方，與拍頭 x/y 一致）的上方，跟著發球者移動
-      const sp = this.players[this.server];
-      const sdir = -sign(this.server);
-      b.x = sp.x + 0.3 * sdir; b.y = sp.y + 0.1 * sdir;
+      // 拋球點 = 拍頭正上方（依手機回報的拍頭方向），跟著發球者移動
+      const rh = this.racketHeadPos(this.server);
+      b.x = rh.x; b.y = rh.y;
       b.vz -= G * dt;
       b.z += b.vz * dt;
       if (b.z < 1.6) { b.z = 1.6; b.vz = 3.0; }
