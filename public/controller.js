@@ -329,7 +329,7 @@ function integrateTranslation(a, now) {
   if (busy) {
     // 揮拍中：不積分揮拍的加速度，但保留揮拍前的速度慣性滑行（逐漸減速），角色不會原地卡住
     const gain = TR_GAINS[trGainIdx];
-    TR.v.r *= Math.max(0, 1 - 3 * dt); TR.v.f *= Math.max(0, 1 - 3 * dt);
+    TR.v.r *= Math.max(0, 1 - 8 * dt); TR.v.f *= Math.max(0, 1 - 8 * dt);
     TR.p.r = clamp(TR.p.r + TR.v.r * dt * gain, -TR_MAX, TR_MAX);
     TR.p.f = clamp(TR.p.f + TR.v.f * dt * gain, -TR_MAX, TR_MAX);
     TR.quietSince = now;
