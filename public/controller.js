@@ -236,8 +236,9 @@ function band(cur, val) {
   if (a >= tSlow) return sgn * 0.5;
   return 0;
 }
+const MANUAL_MOVE = false; // 與伺服器一致：目前為自動跑位，手機姿態不控制移動
 function updateMove() {
-  if (!joined) return;
+  if (!joined || !MANUAL_MOVE) return;
   const now = performance.now();
   // 揮拍中與揮完 0.4 秒內不算移動
   const busy = swinging || now - lastSwingAt < 400;

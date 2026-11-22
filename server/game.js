@@ -13,6 +13,7 @@ export const COURT = {
 const G = 9.8;
 const TOPSPIN_ACC = 6.0;  // 上旋 = 1 時額外向下加速度 m/s²（下旋為向上，球會飄）
 const CURVE_ACC = 4.5;    // 側旋 = 1 時的側向加速度 m/s²
+export const MANUAL_MOVE = false; // true = 手機姿態控制跑位；false = 全自動跑位（目前採用）
 const HALF_L = COURT.length / 2;
 const HALF_W = COURT.singlesWidth / 2;
 
@@ -507,7 +508,7 @@ export class Game {
       const baseY = sign(side) * (HALF_L + COURT.baselineOffset);
       const serving = this.phase === 'serve' && this.server === side;
       const mv = p.move;
-      const manual = !this.bot[side] && (mv.x !== 0 || mv.y !== 0) && this.time - mv.t < 0.6;
+      const manual = MANUAL_MOVE && !this.bot[side] && (mv.x !== 0 || mv.y !== 0) && this.time - mv.t < 0.6;
       if (manual) {
         const spd = 4.5; // 正常速度（輸入 0.5 時為慢走 2.25 m/s）
         // 量化成 8 方向：兩軸都有輸入時取較大的檔位、斜向以 1/√2 正規化，斜走不會比直走快
@@ -541,8 +542,8 @@ export class Game {
           if (land && Math.abs(land.y) < HALF_L - 3) {
             targetY = sign(side) * clamp(Math.abs(land.y) + 1.2, 3.5, HALF_L + COURT.baselineOffset);
           }
-        } else if (!this.bot[side]) {
-          // 對手回球前：留在原地（讓手動站位有意義），只在離譜時慢慢回中
+        } else if (!this.bot[side] && MANUAL_MOVE) {
+          // 手動模式：對手回球前留在原地
           targetX = Math.abs(p.x) > HALF_W + 1.5 ? Math.sign(p.x) * (HALF_W + 1.5) : p.x;
           targetY = p.y;
         }
