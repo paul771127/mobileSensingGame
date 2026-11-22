@@ -13,7 +13,14 @@ export const COURT = {
 const G = 9.8;
 const TOPSPIN_ACC = 6.0;  // 上旋 = 1 時額外向下加速度 m/s²（下旋為向上，球會飄）
 const CURVE_ACC = 4.5;    // 側旋 = 1 時的側向加速度 m/s²
-export const MANUAL_MOVE = false; // true = 手機姿態控制跑位；false = 全自動跑位（目前採用）
+export const MANUAL_MOVE = false; // 舊：手機姿態（傾斜）控制跑位
+// 手機平移控制跑位：手機位移（公尺，最大約 ±0.3）× 增益 = 角色相對基準點的位移
+export const TRANSLATE_MOVE = true;
+const PHONE_RANGE = 0.3;           // 手機平移最大範圍 m
+const COURT_RANGE_X = 5.0;         // 對應球場左右 ±5 m
+const COURT_RANGE_Y = 3.5;         // 對應球場前後 ±3.5 m
+const TRANSLATE_SPEED = 9.0;       // 角色追上目標點的最大速度 m/s
+const ASSIST_BLEND = 0.5;          // 來球最後 0.7 秒，目標點向球靠近的比例
 const HALF_L = COURT.length / 2;
 const HALF_W = COURT.singlesWidth / 2;
 
@@ -54,6 +61,7 @@ export class Game {
       swingAnim: 0, // 揮拍動畫倒數（秒）
       speed: 7,     // 自動跑位速度 m/s
       move: { x: 0, y: 0, t: -10 }, // 手機姿態控制的移動輸入（x: 右為正, y: 朝球網為正）
+      offset: { x: 0, y: 0, t: -10 }, // 手機平移位移（公尺；x 右、y 朝球網）
       head: null, // 拍頭方向單位向量 { r, f, u }（玩家座標：右/前/上），無感測器時為 null
       facing: 0,  // 面向（8 方向，玩家座標）：0 前(朝球網) 1 右前 2 右 3 右後 4 後 5 左後 6 左 7 左前
       facingHold: 0,
@@ -77,6 +85,13 @@ export class Game {
 
   bothReady() {
     return this.players.A.connected && this.players.B.connected;
+  }
+
+  // 手機平移位移（公尺）
+  setOffset(side, x, y) {
+    const p = this.players[side];
+    const n = (v) => (Number.isFinite(v) ? clamp(v, -PHONE_RANGE * 1.2, PHONE_RANGE * 1.2) : 0);
+    p.offset = { x: n(x), y: n(y), t: this.time };
   }
 
   // 手機姿態移動輸入
@@ -529,6 +544,32 @@ export class Game {
         continue;
       }
       let targetX = p.x, targetY = p.y;
+      if (TRANSLATE_MOVE && !this.bot[side] && p.connected) {
+        // 目標 = 基準點（底線中央）+ 手機位移 × 增益；來球最後 0.7 秒再向球靠一半
+        const dir = -sign(side);
+        const ox = clamp(p.offset.x, -PHONE_RANGE, PHONE_RANGE) / PHONE_RANGE;
+        const oy = clamp(p.offset.y, -PHONE_RANGE, PHONE_RANGE) / PHONE_RANGE;
+        targetX = ox * COURT_RANGE_X * dir;
+        targetY = serving ? p.y : baseY + oy * COURT_RANGE_Y * dir;
+        if (assist && b && !serving) {
+          const towardMe = Math.sign(b.vy) === sign(side) && Math.abs(b.vy) > 0.01;
+          if (towardMe) {
+            const tArr = Math.max(0, (p.y - b.y) / b.vy);
+            if (tArr < 0.7) {
+              const bx = clamp(b.x + b.vx * tArr - 0.6 * dir, -HALF_W - 1.5, HALF_W + 1.5);
+              targetX += (bx - targetX) * ASSIST_BLEND;
+            }
+          }
+        }
+        targetX = clamp(targetX, -HALF_W - 2.5, HALF_W + 2.5);
+        const ay = Math.abs(targetY);
+        targetY = sign(side) * clamp(ay, 1.5, HALF_L + 3.5);
+        const dx = targetX - p.x, dy = targetY - p.y, d = Math.hypot(dx, dy);
+        const step = TRANSLATE_SPEED * dt;
+        if (d <= step) { p.x = targetX; p.y = targetY; }
+        else { p.x += dx / d * step; p.y += dy / d * step; }
+        continue;
+      }
       if (serving || !assist) continue;
       targetX = 0; targetY = baseY;
       if (b) {

@@ -192,6 +192,12 @@ function handleMessage(ws, msg) {
       room.game.setMove(ws.meta.side, Number(msg.x), Number(msg.y));
       break;
     }
+    case 'offset': {
+      // { type:'offset', x, y }  手機平移位移（公尺，玩家座標）
+      if (!room || ws.meta.role !== 'controller') return;
+      room.game.setOffset(ws.meta.side, Number(msg.x), Number(msg.y));
+      break;
+    }
     case 'pose': {
       // { type:'pose', r, f, u }  拍頭方向單位向量（玩家座標）
       if (!room || ws.meta.role !== 'controller') return;

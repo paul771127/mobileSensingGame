@@ -47,8 +47,14 @@ function onMessage(msg) {
   }
 }
 
+let lastPhase = null;
 function renderState(s) {
   if (!mySide) return;
+  if (s.phase !== lastPhase) {
+    // 每一分開始（進入發球）時把平移歸零：回到基準站位，漂移不會累積
+    if (s.phase === 'serve') resetTranslation();
+    lastPhase = s.phase;
+  }
   $('score').firstChild.textContent = `${s.score.points.A} - ${s.score.points.B}`;
   $('games').textContent = `局數 ${s.score.games.A} - ${s.score.games.B}`;
   const other = mySide === 'A' ? 'B' : 'A';
@@ -217,6 +223,7 @@ function captureBase() {
 
 function calibrate() {
   captureBase();
+  resetTranslation();
   $('status').textContent = '已校正：現在的姿勢 = 正對球網的準備姿勢';
   if (vibrate && navigator.vibrate) navigator.vibrate(20);
 }
@@ -294,7 +301,58 @@ function onMotion(e) {
       if (moveX || moveY) { moveX = 0; moveY = 0; ws.send({ type: 'move', x: 0, y: 0 }); $('moveInd').textContent = ''; lastMoveMsg = ''; }
     }
   }
+  integrateTranslation(a, now);
   if (now % 10 < 1) updateDebug();
+}
+
+// ---- 手機平移 → 角色位置 ----
+// 把去重力加速度轉到世界座標，再投影到玩家座標（右 / 前），積分成速度與位移。
+// 靜止時（加速度小於門檻持續 120ms）速度歸零抑制漂移；揮拍中與揮完 0.4 秒不積分；位移限制在 ±35cm。
+const TR = { v: { r: 0, f: 0 }, p: { r: 0, f: 0 }, lastT: 0, quietSince: 0, lastSent: 0, lastSentP: { r: 9, f: 9 } };
+const TR_MAX = 0.35, TR_QUIET_ACC = 0.7, TR_QUIET_MS = 120, TR_DAMP = 1.2;
+const TR_GAINS = [1, 1.5, 2, 3]; let trGainIdx = 1; // 位移倍率（積分會低估實際位移，預設 1.5x，可在手機上切換）
+function integrateTranslation(a, now) {
+  if (!orient || !joined) return;
+  const dt = TR.lastT ? Math.min(0.05, (now - TR.lastT) / 1000) : 0;
+  TR.lastT = now;
+  if (!dt) return;
+  const busy = swinging || now - lastSwingAt < 400;
+  const m = orient;
+  // 裝置 → 世界（東/北/上）
+  const wx = m.m11 * a.x + m.m12 * a.y + m.m13 * a.z;
+  const wy = m.m21 * a.x + m.m22 * a.y + m.m23 * a.z;
+  // 世界 → 玩家座標（以校正方位為準）
+  const h = baseHeading * DEG;
+  const ar = wx * -Math.cos(h) + wy * Math.sin(h);
+  const af = wx * -Math.sin(h) + wy * -Math.cos(h);
+  const mag = Math.hypot(ar, af);
+  if (busy) { TR.v.r = 0; TR.v.f = 0; TR.quietSince = now; return; }
+  if (mag < TR_QUIET_ACC) {
+    if (!TR.quietSince) TR.quietSince = now;
+    if (now - TR.quietSince > TR_QUIET_MS) { TR.v.r = 0; TR.v.f = 0; }
+  } else TR.quietSince = 0;
+  TR.v.r = (TR.v.r + ar * dt) * (1 - TR_DAMP * dt);
+  TR.v.f = (TR.v.f + af * dt) * (1 - TR_DAMP * dt);
+  const gain = TR_GAINS[trGainIdx];
+  TR.p.r = clamp(TR.p.r + TR.v.r * dt * gain, -TR_MAX, TR_MAX);
+  TR.p.f = clamp(TR.p.f + TR.v.f * dt * gain, -TR_MAX, TR_MAX);
+  sendOffset(now);
+}
+function sendOffset(now, force = false) {
+  if (!joined) return;
+  if (!force && now - TR.lastSent < 50) return;
+  const dr = Math.abs(TR.p.r - TR.lastSentP.r), df = Math.abs(TR.p.f - TR.lastSentP.f);
+  if (!force && dr < 0.004 && df < 0.004) return;
+  TR.lastSent = now; TR.lastSentP = { r: TR.p.r, f: TR.p.f };
+  const mr = mirror ? -1 : 1;
+  ws.send({ type: 'offset', x: +(TR.p.r * mr).toFixed(3), y: +TR.p.f.toFixed(3) });
+  const cm = (v) => `${Math.round(v * 100)}`;
+  $('moveInd').textContent = (Math.abs(TR.p.r) > 0.01 || Math.abs(TR.p.f) > 0.01)
+    ? `位移 ${TR.p.r >= 0 ? '→' : '←'}${cm(Math.abs(TR.p.r))}cm ${TR.p.f >= 0 ? '↑' : '↓'}${cm(Math.abs(TR.p.f))}cm` : '';
+}
+function resetTranslation() {
+  TR.v.r = 0; TR.v.f = 0; TR.p.r = 0; TR.p.f = 0;
+  sendOffset(performance.now(), true);
 }
 
 function emitSwing(peakMag, meanAx, meanGy, meanGx, meanGz) {
@@ -357,10 +415,11 @@ tap.addEventListener('pointerup', (e) => {
   sendSwing({ strength, dirX, face: 0, loft: 0, plane: 0, spin: 0, curve: 0 });
 });
 const KEYMOVE = { KeyA: [-1, 0], KeyD: [1, 0], KeyW: [0, 1], KeyS: [0, -1] };
-addEventListener('keyup', (e) => { if (joined && KEYMOVE[e.code]) ws.send({ type: 'move', x: 0, y: 0 }); });
+const keyOff = { x: 0, y: 0 };
+addEventListener('keyup', (e) => { if (joined && KEYMOVE[e.code]) { if (KEYMOVE[e.code][0]) keyOff.x = 0; else keyOff.y = 0; ws.send({ type: 'offset', ...keyOff }); } });
 addEventListener('keydown', (e) => {
   if (!joined) return;
-  if (KEYMOVE[e.code]) { e.preventDefault(); ws.send({ type: 'move', x: KEYMOVE[e.code][0], y: KEYMOVE[e.code][1] }); return; }
+  if (KEYMOVE[e.code]) { e.preventDefault(); if (e.repeat) return; if (KEYMOVE[e.code][0]) keyOff.x = KEYMOVE[e.code][0] * 0.3; else keyOff.y = KEYMOVE[e.code][1] * 0.3; ws.send({ type: 'offset', ...keyOff }); return; }
   const k = { Space: {}, ArrowUp: { plane: 0.8 }, ArrowDown: { plane: -0.8 }, ArrowLeft: { face: -0.7 }, ArrowRight: { face: 0.7 }, KeyZ: { spin: 1 }, KeyX: { spin: -1 }, KeyQ: { curve: -1 }, KeyE: { curve: 1 } }[e.code];
   if (k) { e.preventDefault(); sendSwing({ strength: 0.6, dirX: 0, face: 0, loft: 0, plane: 0, spin: 0, curve: 0, ...k }); }
 });
@@ -370,6 +429,7 @@ $('botBtn').onclick = () => ws.send({ type: 'bot', side: mySide === 'A' ? 'B' : 
 $('mirror').onclick = () => { mirror = !mirror; $('mirror').textContent = `左右鏡像：${mirror ? '開' : '關'}`; };
 $('sens').onclick = () => { sensIdx = (sensIdx + 1) % SENS.length; $('sens').textContent = `靈敏度：${SENS[sensIdx].label}`; };
 $('vib').onclick = () => { vibrate = !vibrate; $('vib').textContent = `震動：${vibrate ? '開' : '關'}`; };
+$('trgain').onclick = () => { trGainIdx = (trGainIdx + 1) % TR_GAINS.length; $('trgain').textContent = `位移倍率：${TR_GAINS[trGainIdx]}x`; resetTranslation(); };
 
 function updateDebug() {
   $('debug').textContent = `acc ${debugAcc.toFixed(1)} m/s²  gyro ${gyroAvail ? 'yes' : 'no'}  th ${SENS[sensIdx].th}  plane ${lastPlane.toFixed(2)}`;
