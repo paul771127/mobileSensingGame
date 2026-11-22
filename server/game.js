@@ -240,14 +240,14 @@ export class Game {
     return false;
   }
 
-  // 球拍拍頭的世界座標（與顯示端畫法一致）：手在身體右前方 1.0m 高，拍長 0.68m
+  // 球拍拍頭的世界座標（與顯示端畫法一致）：手在身體右前方 1.0m 高，拍長 0.78m
   racketHeadPos(side) {
     const p = this.players[side];
     const dir = -sign(side); // 玩家座標 → 世界：右 = dir*x, 前 = dir*y
     const h = p.head || { r: 0.5, f: 0.35, u: 0.8 };
     const n = Math.hypot(h.r, h.f, h.u) || 1;
     const hx = p.x + 0.3 * dir, hy = p.y + 0.1 * dir, hz = 1.0;
-    const L = 0.68;
+    const L = 0.78;
     return { x: hx + (h.r / n) * dir * L, y: hy + (h.f / n) * dir * L, z: hz + (h.u / n) * L, hr: h.r / n, hu: h.u / n };
   }
 
@@ -264,7 +264,7 @@ export class Game {
       if (this.time - (p.lastBlockT || -10) < 0.5) continue;
       const rh = this.racketHeadPos(side);
       const d = Math.hypot(b.x - rh.x, b.y - rh.y, b.z - rh.z);
-      if (d > 0.55) continue;
+      if (d > 0.6) continue;
       p.lastBlockT = this.time;
       p.swingAnim = 0.15;
       const s = this.normalizeSwing({

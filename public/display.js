@@ -500,16 +500,16 @@ function drawRacket(side, p, swinging, bodyH) {
   const hv = playerToWorld(side, h.r / n, h.f / n, h.u / n);
   const handLocal = playerToWorld(side, 0.3, 0.1, 0);
   const handZ = 1.0; // 手的高度
-  const len = 0.68;  // 球拍長度
+  const len = 0.78;  // 球拍長度（含較大的拍頭）
   const hx = p.x + handLocal.x, hy = p.y + handLocal.y;
   const a = proj.p(hx, hy, handZ);
   const b = proj.p(hx + hv.x * len, hy + hv.y * len, handZ + hv.z * len);
-  const headR = 0.14 * b.s;
+  const headR = 0.19 * b.s;
   const img = assets.racket;
   if (img) {
     // 圖片：握把底端在 a、拍頭朝 b，長度 = 兩點螢幕距離
     const L = Math.hypot(b.x - a.x, b.y - a.y), ang0 = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
-    const w = L * (img.width / img.height);
+    const w = L * (img.width / img.height) * 1.4; // 拍頭放大
     ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(ang0);
     ctx.drawImage(img, -w / 2, -L, w, L); ctx.restore();
     return;
