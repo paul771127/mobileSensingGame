@@ -272,9 +272,23 @@ let vSum = { x: 0, y: 0, z: 0 }, peakReached = false, swingOrient = null, swingF
 let gyroAvail = false;
 let debugAcc = 0, lastPlane = 0;
 
+// 加速度正負號自動偵測：W3C 規範下，含重力的加速度在裝置座標應與「世界上方向」同號（平放螢幕朝上 z≈+9.8），
+// iOS Safari 回報的是相反號。用姿態矩陣的上方向 (m31,m32,m33) 與含重力加速度做內積累積判斷。
+let accSign = 1, accSignAcc = 0, accSignLocked = false;
+function detectAccSign(e) {
+  const g = e.accelerationIncludingGravity;
+  if (!g || g.x == null || !orient || accSignLocked) return;
+  const m = orient;
+  const dot = g.x * m.m31 + g.y * m.m32 + g.z * m.m33; // 期望 ≈ +9.8
+  accSignAcc += Math.sign(dot);
+  if (Math.abs(accSignAcc) >= 30) { accSign = accSignAcc > 0 ? 1 : -1; accSignLocked = true; }
+}
+
 function onMotion(e) {
-  const a = e.acceleration || e.accelerationIncludingGravity;
-  if (!a || a.x == null) return;
+  detectAccSign(e);
+  const raw = e.acceleration || e.accelerationIncludingGravity;
+  if (!raw || raw.x == null) return;
+  const a = { x: raw.x * accSign, y: raw.y * accSign, z: raw.z * accSign };
   const mag = Math.hypot(a.x, a.y, a.z);
   debugAcc = mag;
   const th = SENS[sensIdx].th;
@@ -440,10 +454,11 @@ $('botBtn').onclick = () => ws.send({ type: 'bot', side: mySide === 'A' ? 'B' : 
 $('mirror').onclick = () => { mirror = !mirror; $('mirror').textContent = `左右鏡像：${mirror ? '開' : '關'}`; };
 $('sens').onclick = () => { sensIdx = (sensIdx + 1) % SENS.length; $('sens').textContent = `靈敏度：${SENS[sensIdx].label}`; };
 $('vib').onclick = () => { vibrate = !vibrate; $('vib').textContent = `震動：${vibrate ? '開' : '關'}`; };
+$('trflip').onclick = () => { accSign = -accSign; accSignLocked = true; $('trflip').textContent = `方向反轉：${accSign < 0 ? '開' : '關'}`; resetTranslation(); };
 $('trgain').onclick = () => { trGainIdx = (trGainIdx + 1) % TR_GAINS.length; $('trgain').textContent = `位移倍率：${TR_GAINS[trGainIdx]}x`; resetTranslation(); };
 
 function updateDebug() {
-  $('debug').textContent = `acc ${debugAcc.toFixed(1)} m/s²  gyro ${gyroAvail ? 'yes' : 'no'}  th ${SENS[sensIdx].th}  plane ${lastPlane.toFixed(2)}`;
+  $('debug').textContent = `acc ${debugAcc.toFixed(1)} m/s²  gyro ${gyroAvail ? 'yes' : 'no'}  sign ${accSignLocked ? (accSign > 0 ? '+' : '-') : '?'}  th ${SENS[sensIdx].th}  plane ${lastPlane.toFixed(2)}`;
   $('face').textContent = orient ? `拍面 ${faceDeg >= 0 ? '+' : ''}${faceDeg.toFixed(0)}°  拍頭仰 ${pitchDelta >= 0 ? '+' : ''}${pitchDelta.toFixed(0)}°  傾 ${tiltDelta >= 0 ? '+' : ''}${tiltDelta.toFixed(0)}°` : '（此裝置沒有姿態感測）';
 }
 setInterval(updateDebug, 120);
