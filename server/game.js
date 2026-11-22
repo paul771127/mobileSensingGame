@@ -545,6 +545,7 @@ export class Game {
       }
       let targetX = p.x, targetY = p.y;
       if (TRANSLATE_MOVE && !this.bot[side] && p.connected) {
+        if (p.swingAnim > 0) continue; // 揮拍中角色定住不動
         // 目標 = 基準點（底線中央）+ 手機位移 × 增益；來球最後 0.7 秒再向球靠一半
         const dir = -sign(side);
         const ox = clamp(p.offset.x, -PHONE_RANGE, PHONE_RANGE) / PHONE_RANGE;
@@ -557,10 +558,7 @@ export class Game {
           if (towardMe) {
             const tArr = Math.max(0, (p.y - b.y) / b.vy);
             const bx = clamp(b.x + b.vx * tArr - 0.6 * dir, -HALF_W - 1.5, HALF_W + 1.5);
-            if (p.swingAnim > 0 && tArr < 0.8 && Math.abs(bx - p.x) < 2.2) {
-              // 揮拍中：撲向來球（lunge），讓擊球時人真的在球旁邊
-              targetX = bx; speed = 12;
-            } else if (tArr < 0.7) {
+            if (tArr < 0.7) {
               targetX += (bx - targetX) * ASSIST_BLEND;
             }
           }
