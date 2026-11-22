@@ -551,12 +551,16 @@ export class Game {
         const oy = clamp(p.offset.y, -PHONE_RANGE, PHONE_RANGE) / PHONE_RANGE;
         targetX = ox * COURT_RANGE_X * dir;
         targetY = serving ? p.y : baseY + oy * COURT_RANGE_Y * dir;
+        let speed = TRANSLATE_SPEED;
         if (assist && b && !serving) {
           const towardMe = Math.sign(b.vy) === sign(side) && Math.abs(b.vy) > 0.01;
           if (towardMe) {
             const tArr = Math.max(0, (p.y - b.y) / b.vy);
-            if (tArr < 0.7) {
-              const bx = clamp(b.x + b.vx * tArr - 0.6 * dir, -HALF_W - 1.5, HALF_W + 1.5);
+            const bx = clamp(b.x + b.vx * tArr - 0.6 * dir, -HALF_W - 1.5, HALF_W + 1.5);
+            if (p.swingAnim > 0 && tArr < 0.8 && Math.abs(bx - p.x) < 2.2) {
+              // 揮拍中：撲向來球（lunge），讓擊球時人真的在球旁邊
+              targetX = bx; speed = 12;
+            } else if (tArr < 0.7) {
               targetX += (bx - targetX) * ASSIST_BLEND;
             }
           }
@@ -565,7 +569,7 @@ export class Game {
         const ay = Math.abs(targetY);
         targetY = sign(side) * clamp(ay, 1.5, HALF_L + 3.5);
         const dx = targetX - p.x, dy = targetY - p.y, d = Math.hypot(dx, dy);
-        const step = TRANSLATE_SPEED * dt;
+        const step = speed * dt;
         if (d <= step) { p.x = targetX; p.y = targetY; }
         else { p.x += dx / d * step; p.y += dy / d * step; }
         continue;

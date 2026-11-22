@@ -285,6 +285,7 @@ function onMotion(e) {
   if (!swinging) {
     if (mag > th && now - lastSwingAt > 350) {
       swinging = true; swingStart = now; peak = mag; peakReached = false;
+      onSwingStartTranslation(now);
       accX = a.x; rotY = rr?.gamma ?? 0; rotX = rr?.beta ?? 0; rotZ = rr?.alpha ?? 0; samples = 1;
       vSum = { x: a.x, y: a.y, z: a.z };
       swingOrient = orient; swingFace = faceDeg; swingLoft = loftDeg; // 以揮拍開始時的拍面為準
@@ -308,7 +309,7 @@ function onMotion(e) {
 // ---- 手機平移 → 角色位置 ----
 // 把去重力加速度轉到世界座標，再投影到玩家座標（右 / 前），積分成速度與位移。
 // 靜止時（加速度小於門檻持續 120ms）速度歸零抑制漂移；揮拍中與揮完 0.2 秒不積分加速度、只以慣性滑行；位移限制在 ±35cm。
-const TR = { v: { r: 0, f: 0 }, p: { r: 0, f: 0 }, lastT: 0, quietSince: 0, lastSent: 0, lastSentP: { r: 9, f: 9 } };
+const TR = { v: { r: 0, f: 0 }, p: { r: 0, f: 0 }, lastT: 0, quietSince: 0, lastSent: 0, lastSentP: { r: 9, f: 9 }, hist: [] };
 const TR_MAX = 0.35, TR_QUIET_ACC = 0.7, TR_QUIET_MS = 120, TR_DAMP = 1.2;
 const TR_GAINS = [1, 1.5, 2, 3]; let trGainIdx = 1; // 位移倍率（積分會低估實際位移，預設 1.5x，可在手機上切換）
 function integrateTranslation(a, now) {
@@ -326,16 +327,7 @@ function integrateTranslation(a, now) {
   const ar = wx * -Math.cos(h) + wy * Math.sin(h);
   const af = wx * -Math.sin(h) + wy * -Math.cos(h);
   const mag = Math.hypot(ar, af);
-  if (busy) {
-    // 揮拍中：不積分揮拍的加速度，但保留揮拍前的速度慣性滑行（逐漸減速），角色不會原地卡住
-    const gain = TR_GAINS[trGainIdx];
-    TR.v.r *= Math.max(0, 1 - 8 * dt); TR.v.f *= Math.max(0, 1 - 8 * dt);
-    TR.p.r = clamp(TR.p.r + TR.v.r * dt * gain, -TR_MAX, TR_MAX);
-    TR.p.f = clamp(TR.p.f + TR.v.f * dt * gain, -TR_MAX, TR_MAX);
-    TR.quietSince = now;
-    sendOffset(now);
-    return;
-  }
+  if (busy) { TR.v.r = 0; TR.v.f = 0; TR.quietSince = now; return; } // 揮拍中：手機位移不可信，保持原位（球場上的「撲球」由伺服器處理）
   if (mag < TR_QUIET_ACC) {
     if (!TR.quietSince) TR.quietSince = now;
     if (now - TR.quietSince > TR_QUIET_MS) { TR.v.r = 0; TR.v.f = 0; }
@@ -345,7 +337,17 @@ function integrateTranslation(a, now) {
   const gain = TR_GAINS[trGainIdx];
   TR.p.r = clamp(TR.p.r + TR.v.r * dt * gain, -TR_MAX, TR_MAX);
   TR.p.f = clamp(TR.p.f + TR.v.f * dt * gain, -TR_MAX, TR_MAX);
+  // 位移歷史（300ms），揮拍開始時用來回溯引拍造成的假位移
+  TR.hist.push({ t: now, r: TR.p.r, f: TR.p.f });
+  while (TR.hist.length && now - TR.hist[0].t > 300) TR.hist.shift();
   sendOffset(now);
+}
+// 揮拍開始：引拍（反方向的手臂動作）在過去約 250ms 內被當成平移，回溯到引拍前的位置
+function onSwingStartTranslation(now) {
+  const h = TR.hist.find((x) => now - x.t <= 250) || TR.hist[0];
+  if (h) { TR.p.r = h.r; TR.p.f = h.f; }
+  TR.v.r = 0; TR.v.f = 0; TR.hist.length = 0;
+  sendOffset(now, true);
 }
 function sendOffset(now, force = false) {
   if (!joined) return;
@@ -360,7 +362,7 @@ function sendOffset(now, force = false) {
     ? `位移 ${TR.p.r >= 0 ? '→' : '←'}${cm(Math.abs(TR.p.r))}cm ${TR.p.f >= 0 ? '↑' : '↓'}${cm(Math.abs(TR.p.f))}cm` : '';
 }
 function resetTranslation() {
-  TR.v.r = 0; TR.v.f = 0; TR.p.r = 0; TR.p.f = 0;
+  TR.v.r = 0; TR.v.f = 0; TR.p.r = 0; TR.p.f = 0; TR.hist.length = 0;
   sendOffset(performance.now(), true);
 }
 
