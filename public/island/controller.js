@@ -55,7 +55,11 @@ function renderState(s) {
   if (!mySide || gestFlashing) return;
   const me = s.players?.[mySide];
   let sub = '';
-  if (s.phase === 'lobby') sub = '向前短推（敲擊）開始遊戲';
+  const other = s.players?.[mySide === 'A' ? 'B' : 'A'];
+  const showBot = s.phase === 'lobby' && other && (!other.connected || other.bot);
+  $('botBtn').style.display = showBot ? '' : 'none';
+  $('botBtn').textContent = other?.bot ? '🤖 電腦搭檔已上場（再按一次移除）' : '🤖 只有一個人？讓電腦當搭檔';
+  if (s.phase === 'lobby') sub = s.bots ? '電腦搭檔就位，向前短推開始' : '向前短推（敲擊）開始遊戲';
   else if (s.phase === 'countdown') sub = '準備…';
   else if (s.phase === 'win' || s.phase === 'lose') sub = '向前短推再來一局';
   else if (me?.dead) sub = `掉下去了，${me.respawnIn.toFixed(1)} 秒後復活`;
@@ -266,6 +270,7 @@ function flashGesture(text, kind) {
 // 備援按鈕（沒有感測器 / 桌機測試）
 $('tapJump').addEventListener('pointerdown', (e) => { e.preventDefault(); if (joined) sendAct('jump'); });
 $('tapHit').addEventListener('pointerdown', (e) => { e.preventDefault(); if (joined) sendAct('hit'); });
+$('botBtn').onclick = () => { const other = lastState?.players?.[mySide === 'A' ? 'B' : 'A']; ws.send({ type: 'bot', on: !(other && other.bot) }); };
 $('sens').onclick = () => { sensIdx = (sensIdx + 1) % SENS.length; $('sens').textContent = `手勢靈敏度：${SENS[sensIdx].label}`; };
 $('flipY').onclick = () => { flipY = !flipY; $('flipY').textContent = `前後反轉：${flipY ? '開' : '關'}`; };
 $('flipX').onclick = () => { flipX = !flipX; $('flipX').textContent = `左右反轉：${flipX ? '開' : '關'}`; };

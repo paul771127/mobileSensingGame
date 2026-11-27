@@ -408,18 +408,18 @@ function updateHud(s) {
   const hp = $('hp');
   while (hp.children.length - 1 < s.boss.maxHp) { const h = document.createElement('i'); h.className = 'heart'; hp.appendChild(h); }
   [...hp.querySelectorAll('.heart')].forEach((h, i) => h.classList.toggle('off', i >= s.boss.hp));
-  $('mode').textContent = s.mode >= 2 ? '雙人合作' : s.mode === 1 ? '單人模式（窗口加長）' : '等待玩家';
+  $('mode').textContent = s.bots ? '你 + 電腦搭檔（窗口加長）' : s.mode >= 2 ? '雙人合作' : s.mode === 1 ? '單人模式（窗口加長）' : '等待玩家';
   // 玩家卡
   const cards = [];
   for (const side of ['A', 'B']) {
     const p = s.players[side];
     const ab = p.ability ? `<span class="tag ${p.ability}">${s.abilities[p.ability].name}</span>` : '';
-    let st = !p.connected ? '未加入' : p.dead ? `掉下島… ${p.respawnIn.toFixed(1)}s` : p.pad && p.padT ? `選擇中 ${Math.round(p.padT * 100)}%` : p.onTower ? '在鐘樓上' : s.marks.target === side && s.phase === 'play' ? '被盯上！' : (p.kb ? '鍵盤' : '手機');
-    cards.push(`<div class="pcard pill ${side} ${p.connected ? '' : 'off'}"><div class="dot"></div><div><b>${side === 'A' ? '1P' : '2P'} ${LABEL[side]}${p.name && !p.kb ? ' · ' + esc(p.name) : ''}</b>${ab}<div class="st">${st}</div></div></div>`);
+    let st = !p.connected ? '未加入' : p.bot && p.dead ? `電腦 · 掉下島… ${p.respawnIn.toFixed(1)}s` : p.dead ? `掉下島… ${p.respawnIn.toFixed(1)}s` : p.pad && p.padT ? `選擇中 ${Math.round(p.padT * 100)}%` : p.onTower ? '在鐘樓上' : s.marks.target === side && s.phase === 'play' ? '被盯上！' : (p.bot ? '電腦搭檔' : p.kb ? '鍵盤' : '手機');
+    cards.push(`<div class="pcard pill ${side} ${p.connected ? '' : 'off'}"><div class="dot"></div><div><b>${side === 'A' ? '1P' : '2P'} ${LABEL[side]}${p.name && !p.kb && !p.bot ? ' · ' + esc(p.name) : ''}</b>${ab}<div class="st">${st}</div></div></div>`);
   }
   $('players').innerHTML = cards.join('');
   const n = s.mode;
-  $('joinLine').textContent = n === 0 ? '等待手機加入…（或按 1 / 2 用鍵盤試玩）' : n === 1 ? '1 位玩家已加入：向前短推開始單人模式，或等第二位加入' : '2 位玩家都到了：任一人向前短推開始！';
+  $('joinLine').textContent = n === 0 ? '等待手機加入…（或按 1 / 2 用鍵盤試玩）' : s.bots ? '電腦搭檔就位：向前短推開始！' : n === 1 ? '1 位玩家已加入：向前短推開始單人模式、等第二位加入，或按 B 加電腦搭檔' : '2 位玩家都到了：任一人向前短推開始！';
   // 底部提示
   $('hintText').innerHTML = hintFor(s);
 }
@@ -625,6 +625,13 @@ addEventListener('keydown', (e) => {
   if (e.repeat) { if (Object.values(KEYMAP).some((m) => Object.values(m).includes(e.code))) e.preventDefault(); return; }
   if (e.code === 'Digit1' || e.code === 'Digit2') { const side = e.code === 'Digit1' ? 'A' : 'B'; kbOn[side] = !kbOn[side]; ws.send({ type: 'kb', side, on: kbOn[side] }); return; }
   if (e.code === 'KeyR') { ws.send({ type: 'reset' }); return; }
+  if (e.code === 'Enter' && (state?.phase === 'win' || state?.phase === 'lose')) { ws.send({ type: 'restart' }); return; }
+  if (e.code === 'KeyB') { // 電腦搭檔：有就移除，沒有就加到空位
+    const botSide = ['A', 'B'].find((sd) => state?.players?.[sd]?.bot);
+    if (botSide) ws.send({ type: 'bot', side: botSide, on: false });
+    else { const free = ['A', 'B'].find((sd) => !state?.players?.[sd]?.connected); if (free) ws.send({ type: 'bot', side: free, on: true }); }
+    return;
+  }
   if (e.code === 'KeyF') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); return; }
   for (const side of ['A', 'B']) {
     const m = KEYMAP[side];

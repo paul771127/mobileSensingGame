@@ -178,10 +178,56 @@ function runAbilities() {
   void g;
 }
 
+// ---- 真人 + 電腦搭檔：真人只負責引怪與打核心，其餘交給電腦
+function runWithBot() {
+  const g = new IslandGame();
+  g.setConnected('A', true, 'kb', true);
+  g.setBot('B', true);
+  assert.equal(g.playerCount(), 2); assert.equal(g.humanCount(), 1);
+  g.action('A', 'hit'); step(g, 3.3);
+  assert.equal(g.phase, 'play');
+  const sp = spring(g); const sx = cellX(sp.c), sz = cellZ(sp.r);
+  // 第一輪：巨怪先盯 A（真人）
+  assert.ok(waitFor(g, () => g.boss.state === 'aim' && g.boss.target === 'A', 6));
+  assert.ok(walkTo(g, 'A', sx, sz, 4));
+  assert.ok(waitFor(g, () => g.boss.state === 'lock', 4));
+  walkTo(g, 'A', sx, sz + S, 1.5);
+  assert.ok(waitFor(g, () => g.boss.state === 'stuck', 3));
+  // 電腦應自己走到側邊把彈簧磚敲進斷橋區
+  assert.ok(waitFor(g, () => springPlat(g), 8), '電腦應在窗口內敲飛彈簧磚');
+  const plat = springPlat(g);
+  assert.ok(g.bridge.some(([c, r]) => c === plat.c && r === plat.r), '電腦敲的落點應在斷橋區');
+  // 真人跑去核心前等；電腦應去彈、敲鐘
+  const core = g.corePos();
+  walkTo(g, 'A', core.x, core.z + 1.0, 10, 0.25);
+  assert.ok(waitFor(g, () => g.boss.state === 'open', 25, () => { const p = g.players.A; if (Math.hypot(p.x - core.x, p.z - core.z - 1) > 0.5) { const dx = core.x - p.x, dz = core.z + 1 - p.z, d = Math.hypot(dx, dz); g.setMove('A', dx / d, dz / d); } else g.setMove('A', 0, 0); }), '電腦應彈上鐘樓敲鐘');
+  g.setMove('A', 0, 0);
+  // 真人 + 電腦一起打核心
+  assert.ok(waitFor(g, () => g.boss.hp === 0 || g.boss.state !== 'open', 20, () => { if (g.now >= g.players.A.hitCd) g.action('A', 'hit'); }));
+  assert.equal(g.boss.hp, 0, '應打掉核心');
+  assert.equal(g.phase, 'win');
+}
+// ---- 電腦自己也能被盯、自己引怪跳開而不掉島
+function runBotLured() {
+  const g = new IslandGame();
+  g.setConnected('A', true, 'kb', true);
+  g.setBot('B', true);
+  g.action('A', 'hit'); step(g, 3.3);
+  // 真人躲遠一點、什麼都不做；第一次盯 A，A 不站磚 → 咬 A 腳下的磚；第二次盯 B（電腦）
+  walkTo(g, 'A', cellX(2), cellZ(1), 5);
+  assert.ok(waitFor(g, () => g.boss.target === 'B' && g.boss.state === 'aim', 40), '巨怪應輪到盯電腦');
+  assert.ok(waitFor(g, () => g.boss.state === 'stuck' || g.boss.state === 'recoil', 10));
+  assert.ok(!g.players.B.dead, '電腦引怪後不該掉下島');
+  // 真人全程沒掉島（站在遠處）
+  assert.ok(!g.players.A.dead);
+}
+
 const t0 = Date.now();
 runLoop({ two: false }); console.log('✓ 單人完整循環');
 runLoop({ two: true }); console.log('✓ 雙人完整循環');
 runMissAndRetry(); console.log('✓ 落空 → 彈簧磚長回 → 掉島復活');
 runSwallow(); console.log('✓ 錯過窗口 → 吞掉 → 長回');
 runAbilities(); console.log('✓ 能力區分流');
+runWithBot(); console.log('✓ 真人 + 電腦搭檔完整循環');
+runBotLured(); console.log('✓ 電腦被盯上會自己引怪跳開');
 console.log(`全部通過（${Date.now() - t0} ms）`);

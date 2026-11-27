@@ -171,7 +171,11 @@ function handleMessage(ws, msg) {
           }
         }
         let side = msg.side;
-        if (!side || r.controllers[side]) side = !r.controllers.A ? 'A' : !r.controllers.B ? 'B' : null;
+        if (!side || r.controllers[side]) {
+          // 沒指定或被占用：優先拿完全沒人的位置，其次是電腦 / 鍵盤占著的位置（真人接手）
+          const free = ['A', 'B'].filter((sd) => !r.controllers[sd]);
+          side = free.find((sd) => !r.game.players[sd].connected) || free[0] || null;
+        }
         if (!side) return safeSend(ws, JSON.stringify({ type: 'error', code: 'full', text: '房間已滿' }));
         ws.meta.cid = cid;
         r.controllers[side] = ws;
@@ -261,10 +265,22 @@ function handleIslandMessage(ws, room, msg) {
       if (msg.act === 'jump' || msg.act === 'hit') game.action(side, msg.act);
       return true;
     }
-    case 'swing': case 'offset': case 'pose': case 'bot':
+    case 'bot': {  // { side?, on } 電腦搭檔：占用沒有手機的位置；手機自己送時預設給另一邊
+      let side = msg.side === 'A' || msg.side === 'B' ? msg.side : null;
+      if (!side && isCtrl) side = ws.meta.side === 'A' ? 'B' : 'A';
+      if (!side) side = !game.players.A.connected ? 'A' : !game.players.B.connected ? 'B' : game.players.A.bot ? 'A' : game.players.B.bot ? 'B' : null;
+      if (!side || room.controllers[side]) return true;
+      game.setBot(side, msg.on !== false);
+      room.broadcast({ type: 'players', players: { A: game.players.A.connected, B: game.players.B.connected } });
+      return true;
+    }
+    case 'swing': case 'offset': case 'pose':
       return true; // 球拍遊戲的訊息，島上忽略
     case 'reset':
       game.resetMatch();
+      return true;
+    case 'restart': // 結算畫面按 Enter：直接再來一局
+      if (game.phase === 'win' || game.phase === 'lose') game.restart();
       return true;
   }
   return false;

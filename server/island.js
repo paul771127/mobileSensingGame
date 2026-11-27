@@ -105,7 +105,8 @@ export class IslandGame {
 
   newPlayer(side) {
     return {
-      side, connected: false, name: null, kb: false,
+      side, connected: false, name: null, kb: false, bot: false, bounced: false,
+      botPath: null, botPathAt: -9, botGoalKey: null,
       x: cellX(this.spawn.c) + (side === 'A' ? -0.4 : 0.4), y: 0, z: cellZ(this.spawn.r), prevY: 0,
       vx: 0, vy: 0, vz: 0, facing: Math.PI, grounded: true, airborne: false,
       dead: false, respawnAt: 0, input: { x: 0, y: 0 }, jumpReq: false, hitReq: false,
@@ -117,7 +118,7 @@ export class IslandGame {
   setConnected(side, on, name, kb = false) {
     const p = this.players[side]; if (!p) return;
     const was = p.connected;
-    p.connected = on; p.kb = on ? kb : false;
+    p.connected = on; p.kb = on ? kb : false; p.bot = false;
     if (name) p.name = name;
     if (on && !was) {
       this.placeAtSafeTile(p);
@@ -126,10 +127,25 @@ export class IslandGame {
     }
     if (!on) {
       p.input = { x: 0, y: 0 };
-      if (!this.players.A.connected && !this.players.B.connected && this.phase !== 'lobby') this.resetMatch();
+      if (this.humanCount() === 0 && this.phase !== 'lobby') this.resetMatch();
+    }
+  }
+  // 電腦玩家：占用沒有真人的位置，真人加入時自動讓位
+  setBot(side, on) {
+    const p = this.players[side]; if (!p) return;
+    if (on) {
+      if (p.connected && !p.bot) return;
+      p.connected = true; p.bot = true; p.kb = false; p.name = '電腦';
+      this.placeAtSafeTile(p); p.dead = false; p.input = { x: 0, y: 0 };
+      this.pushEvent('bot', `電腦搭檔（${this.label(side)}）上場`, side);
+    } else if (p.bot) {
+      p.connected = false; p.bot = false; p.input = { x: 0, y: 0 };
+      if (this.humanCount() === 0 && this.phase !== 'lobby') this.resetMatch();
     }
   }
   playerCount() { return (this.players.A.connected ? 1 : 0) + (this.players.B.connected ? 1 : 0); }
+  humanCount() { return ['A', 'B'].filter((s) => this.players[s].connected && !this.players[s].bot).length; }
+  botCount() { return ['A', 'B'].filter((s) => this.players[s].connected && this.players[s].bot).length; }
   label(side) { return side === 'A' ? '藍' : '橘'; }
 
   setMove(side, x, y) {
@@ -145,7 +161,7 @@ export class IslandGame {
   // ---------- 主迴圈 ----------
   update(dt) {
     this.now += dt;
-    const n = this.playerCount();
+    const n = this.humanCount(); // 敲磚與弱點窗口長度以真人數為準，電腦搭檔不縮短窗口
     if (this.phase === 'lobby') {
       // 任一玩家「敲擊」開始倒數
       for (const s of ['A', 'B']) { const p = this.players[s]; if (p.connected && p.hitReq) { this.startCountdown(); } p.hitReq = false; p.jumpReq = false; }
@@ -153,7 +169,7 @@ export class IslandGame {
       return;
     }
     if (this.phase === 'countdown') {
-      if (n === 0) { this.resetMatch(); return; }
+      if (this.playerCount() === 0) { this.resetMatch(); return; }
       this.updatePlayers(dt, true);
       if (this.now >= this.countdownAt) this.startPlay();
       return;
@@ -170,10 +186,11 @@ export class IslandGame {
     this.updatePlatforms();
     this.updateBoss(dt, n);
     this.updateFlight();
+    this.updateBots(dt);
     this.updatePlayers(dt, false);
   }
 
-  startCountdown() { this.phase = 'countdown'; this.countdownAt = this.now + 3; this.pushEvent('countdown', this.playerCount() >= 2 ? '雙人合作模式，準備！' : '單人模式，準備！'); }
+  startCountdown() { this.phase = 'countdown'; this.countdownAt = this.now + 3; this.pushEvent('countdown', this.botCount() ? '你和電腦搭檔，準備！' : this.playerCount() >= 2 ? '雙人合作模式，準備！' : '單人模式，準備！'); }
   startPlay() { this.phase = 'play'; this.phaseAt = this.now; this.timeLeft = ROUND_TIME; this.boss.state = 'rest'; this.boss.until = this.now + 2; this.pushEvent('start', '開始！引巨怪咬下金色彈簧磚'); }
   restart() { this.resetMatch(); this.startCountdown(); }
   finish(result) {
@@ -277,13 +294,13 @@ export class IslandGame {
 
   land(p, sf) {
     p.y = sf.top; p.vy = 0; p.grounded = true;
-    const wasAir = p.airborne; p.airborne = false;
+    const wasAir = p.airborne; p.airborne = false; p.bounced = false;
     p.lastSupportKey = sf.key;
     if (sf.type === 'plat' && sf.kind === 'spring') { this.bounce(p, sf); return; }
     if (wasAir && p.ability === 'boots') this.clayAnchor(p);
   }
   bounce(p, sf) {
-    p.vy = SPRING_VY; p.grounded = false; p.airborne = true; p.y = sf.top + 0.01;
+    p.vy = SPRING_VY; p.grounded = false; p.airborne = true; p.bounced = true; p.y = sf.top + 0.01;
     this.pushEvent('spring', `${this.label(p.side)} 彈起來了！`, p.side, true);
   }
   clayAnchor(p) {
@@ -370,7 +387,7 @@ export class IslandGame {
 
   ringBell(p) {
     const b = this.boss;
-    const n = this.playerCount();
+    const n = this.humanCount();
     const dur = n >= 2 ? 8 : 15;
     this.bellRingT = this.now;
     const first = !this.bellRungOnce;
@@ -502,7 +519,7 @@ export class IslandGame {
             this.tiles.delete(k);
             b.held = { kind: tile.kind, origin: { c: tile.c, r: tile.r } };
             b.stuckDur = n >= 2 ? 3.5 : 6.5;
-            b.state = 'stuck'; b.until = this.now + b.stuckDur;
+            b.state = 'stuck'; b.until = this.now + b.stuckDur; b.stuckAt = this.now;
             this.pushEvent('bite', `咬住${tile.kind === 'spring' ? '彈簧磚' : '地磚'}了！巨怪卡住 ${b.stuckDur} 秒，從側邊敲它，磚會朝遠離你的方向飛`, null);
           } else {
             b.state = 'recoil'; b.until = this.now + 1.2; this.bossMoveTo(BOSS_ANCHOR, 0.9);
@@ -534,6 +551,188 @@ export class IslandGame {
     }
   }
 
+  // ---------- 電腦玩家 ----------
+  updateBots(dt) {
+    for (const s of ['A', 'B']) {
+      const p = this.players[s];
+      if (!p.connected || !p.bot || p.dead) continue;
+      try { this.botThink(p); } catch (e) { console.error('bot error', e); p.input = { x: 0, y: 0 }; }
+    }
+  }
+  botThink(p) {
+    const b = this.boss;
+    const other = this.players[p.side === 'A' ? 'B' : 'A'];
+    const human = other.connected && !other.bot && !other.dead ? other : null;
+    const [pc, pr] = toCell(p.x, p.z);
+    const stop = () => { p.input.x = 0; p.input.y = 0; };
+    // 空中：彈起後朝鐘樓平台飄
+    if (!p.grounded) {
+      if (p.bounced) { const dx = TOWER.x - p.x, dz = TOWER.z - p.z, d = Math.hypot(dx, dz) || 1; const k = Math.min(1, d / 0.8); p.input.x = dx / d * k; p.input.y = dz / d * k; }
+      return;
+    }
+    // 腳下的磚被鎖定：往遠離巨怪的方向跳到鄰磚
+    if (b.locked && (b.state === 'lock' || b.state === 'lunge') && b.locked[0] === pc && b.locked[1] === pr) {
+      const esc = this.botEscapeCell(pc, pr);
+      if (esc) this.botMoveTo(p, cellX(esc[0]), cellZ(esc[1]), true); else stop();
+      return;
+    }
+    const core = this.corePos();
+    const coreFront = this.botReachSpot(p, core, this.hitRange(p)) || { x: core.x, z: core.z + 1.0 };
+    // 防護打開：打核心
+    if (b.state === 'open') {
+      if (this.inReach(p, core, 1.8)) { stop(); if (this.now >= p.hitCd) p.hitReq = true; return; }
+      if (p.onTower) { this.botMoveTo(p, TOWER.x - 2.2, TOWER.z, true); return; } // 走下塔（掉島後復活再跑）
+      this.botMoveTo(p, coreFront.x, coreFront.z, true); return;
+    }
+    // 巨怪卡住：到能把磚敲進斷橋區（至少落在島上）的側邊位置，敲它
+    if (b.state === 'stuck' && b.held) {
+      const m = this.mouthPos();
+      const spot = this.botHitSpot(p, m, b.held.kind === 'spring');
+      const pred = this.predictLanding(p);
+      const remain = b.until - this.now;
+      const good = pred.ok && (b.held.kind !== 'spring' || pred.inZone || remain < 1.2 || (spot && !spot.inZone));
+      const reacted = this.now - b.stuckAt >= 0.8 || remain < 0.6; // 反應時間：留給真人先敲的機會
+      if (this.inReach(p, m, 2.2) && good && reacted) { stop(); if (this.now >= p.hitCd) p.hitReq = true; return; }
+      if (spot) this.botMoveTo(p, spot.x, spot.z, true); else stop();
+      return;
+    }
+    const springTile = [...this.tiles.values()].find((t) => t.kind === 'spring');
+    const springPlat = [...this.platforms.values()].find((pl) => pl.kind === 'spring');
+    const platInZone = springPlat && this.bridge.some(([c, r]) => c === springPlat.c && r === springPlat.r);
+    // 被盯上：站上彈簧磚引怪（鎖定後上面的邏輯會跳開）
+    if (b.target === p.side && (b.state === 'aim' || b.state === 'lock')) {
+      if (b.state === 'lock') { stop(); return; }
+      if (springTile && !springPlat) this.botMoveTo(p, cellX(springTile.c), cellZ(springTile.r), true);
+      else stop();
+      return;
+    }
+    // 彈簧磚在斷橋旁、防護未開：離平台近的去敲鐘，另一人先到核心前站位
+    if (platInZone && !b.pendingOpen) {
+      const bell = this.bellPos();
+      if (p.onTower) { if (this.inReach(p, bell, 2.5)) { stop(); if (this.now >= p.hitCd) p.hitReq = true; } else this.botMoveTo(p, TOWER.x, TOWER.z, true); return; }
+      const px = cellX(springPlat.c), pz = cellZ(springPlat.r);
+      const myD = Math.hypot(p.x - px, p.z - pz), hD = human ? Math.hypot(human.x - px, human.z - pz) : Infinity;
+      const iGo = !human || (!human.onTower && hD > myD + 1.0);
+      if (iGo) { this.botMoveTo(p, px, pz, true); return; }
+      this.botMoveTo(p, coreFront.x, coreFront.z, true); return;
+    }
+    // 搭檔被盯：先到預計咬點的側邊待命
+    if (b.target && b.target !== p.side && (b.state === 'aim' || b.state === 'lock' || b.state === 'lunge')) {
+      let cell = b.locked;
+      if (!cell && other.connected) { const [c, r] = toCell(other.x, other.z); cell = this.tiles.has(key(c, r)) ? [c, r] : (springTile ? [springTile.c, springTile.r] : null); }
+      if (cell) {
+        const m = { x: cellX(cell[0]), y: 0.4, z: cellZ(cell[1]) }; // 咬下後嘴巴會落在這格中心
+        const spot = this.botHitSpot(p, m, this.tiles.get(key(cell[0], cell[1]))?.kind === 'spring', cell);
+        if (spot) { this.botMoveTo(p, spot.x, spot.z, true); return; }
+      }
+    }
+    // 鐘響後沒能力：去拿回音槌
+    if (this.bellRungOnce && !p.ability) {
+      const pad = this.pads.find((x) => x.kind === 'hammer');
+      if (pad) { this.botMoveTo(p, cellX(pad.c), cellZ(pad.r), true); return; }
+    }
+    // 閒置：站在彈簧磚南邊一格（不擋路、也不會被連帶咬到）
+    if (springTile) { this.botMoveTo(p, cellX(springTile.c), cellZ(springTile.r) + S, true); return; }
+    this.botMoveTo(p, cellX(this.spawn.c), cellZ(this.spawn.r), true);
+  }
+  // 找一個站得住、敲下去磚會落在想要位置的側邊點
+  botHitSpot(p, mouth, wantZone, excludeCell = null) {
+    let best = null, bestScore = -Infinity;
+    for (let i = 0; i < 24; i++) {
+      const a = i * Math.PI / 12;
+      const dx = Math.cos(a), dz = Math.sin(a);
+      const sx = mouth.x - dx * 1.25, sz = mouth.z - dz * 1.25;
+      const [sc, sr] = toCell(sx, sz);
+      if (excludeCell && sc === excludeCell[0] && sr === excludeCell[1]) continue;
+      if (!this.surfacesAt(sx, sz).some((sf) => sf.top <= TILE_H + 0.01)) continue;
+      const [lc, lr] = toCell(mouth.x + dx * FLIGHT_DIST, mouth.z + dz * FLIGHT_DIST);
+      const ok = inGrid(lc, lr) && !(lc === TOWER.c && lr === TOWER.r);
+      const inZone = this.bridge.some(([c, r]) => c === lc && r === lr);
+      if (!ok) continue;
+      let score = (inZone ? 10 : 0) * (wantZone ? 1 : 0.2) - Math.hypot(p.x - sx, p.z - sz) * 0.3;
+      if (score > bestScore) { bestScore = score; best = { x: sx, z: sz, inZone, ok }; }
+    }
+    return best;
+  }
+  // 在目標（核心 / 鐘）敲擊距離內找一個站得住、離自己最近的點
+  botReachSpot(p, target, range) {
+    let best = null, bd = Infinity;
+    for (const rad of [range - 0.35, range - 0.7, range - 1.0]) {
+      if (rad <= 0.2) continue;
+      for (let i = 0; i < 16; i++) {
+        const a = i * Math.PI / 8;
+        const x = target.x + Math.cos(a) * rad, z = target.z + Math.sin(a) * rad;
+        const [c, r] = toCell(x, z);
+        if (!this.botWalkable(c, r)) continue;
+        if (!this.surfacesAt(x, z).some((sf) => sf.top <= TILE_H + 0.01)) continue;
+        const d = Math.hypot(p.x - x, p.z - z);
+        if (d < bd) { bd = d; best = { x, z }; }
+      }
+    }
+    return best;
+  }
+  botEscapeCell(c, r) {
+    const opts = [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]];
+    let best = null, bd = -Infinity;
+    for (const [dc, dr] of opts) {
+      const k = key(c + dc, r + dr);
+      if (!this.tiles.has(k) && !this.platforms.has(k)) continue;
+      const score = dr * 2 - Math.abs(dc); // 往南（遠離巨怪）優先
+      if (score > bd) { bd = score; best = [c + dc, r + dr]; }
+    }
+    return best;
+  }
+  botWalkable(c, r) {
+    if (!inGrid(c, r)) return false;
+    const k = key(c, r);
+    if (this.boss.locked && (this.boss.state === 'lock' || this.boss.state === 'lunge') && this.boss.locked[0] === c && this.boss.locked[1] === r) return false;
+    return this.tiles.has(k) || this.platforms.has(k);
+  }
+  // BFS 找路（四方向，只走有磚 / 平台的格），回傳格子序列（含起點）
+  botFindPath(from, to) {
+    const start = key(from[0], from[1]);
+    const prev = new Map([[start, null]]);
+    const q = [from];
+    let found = null, nearest = from, nd = Infinity;
+    while (q.length) {
+      const cur = q.shift();
+      const d = Math.hypot(cur[0] - to[0], cur[1] - to[1]);
+      if (d < nd) { nd = d; nearest = cur; }
+      if (cur[0] === to[0] && cur[1] === to[1]) { found = cur; break; }
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const n = [cur[0] + dc, cur[1] + dr], k = key(n[0], n[1]);
+        if (prev.has(k) || !this.botWalkable(n[0], n[1])) continue;
+        prev.set(k, cur); q.push(n);
+      }
+    }
+    const end = found || nearest;
+    const path = []; let cur = end;
+    while (cur) { path.unshift(cur); cur = prev.get(key(cur[0], cur[1])); }
+    return path;
+  }
+  // 沿格子走到目標點；direct = 最後一段直接走向目標點（目標可能是平台 / 塔）
+  botMoveTo(p, x, z, direct = false) {
+    const from = toCell(p.x, p.z), to = toCell(x, z);
+    const goalKey = key(to[0], to[1]);
+    if (p.botGoalKey !== goalKey || this.now - p.botPathAt > 0.5 || !p.botPath) {
+      p.botPath = this.botFindPath(from, to); p.botPathAt = this.now; p.botGoalKey = goalKey;
+    }
+    const path = p.botPath;
+    while (path.length > 1 && path[0][0] === from[0] && path[0][1] === from[1] && Math.hypot(cellX(path[1][0]) - p.x, cellZ(path[1][1]) - p.z) < 0.9 && path.length > 2) path.shift();
+    let tx = x, tz = z;
+    if (path.length > 1) {
+      const next = path[0][0] === from[0] && path[0][1] === from[1] ? path[1] : path[0];
+      const last = path[path.length - 1];
+      const atLast = last[0] === from[0] && last[1] === from[1];
+      if (!atLast) { tx = cellX(next[0]); tz = cellZ(next[1]); }
+      else if (!direct) { tx = cellX(last[0]); tz = cellZ(last[1]); }
+    } else if (!direct && !this.botWalkable(to[0], to[1])) { tx = cellX(from[0]); tz = cellZ(from[1]); }
+    const dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz);
+    if (d < 0.08) { p.input.x = 0; p.input.y = 0; return; }
+    const k = Math.min(1, d / 0.45);
+    p.input.x = dx / d * k; p.input.y = dz / d * k;
+  }
+
   // ---------- 事件 / 快照 ----------
   pushEvent(type, text, side = null, quiet = false) {
     const ev = { t: Math.round(this.now * 1000), type, text, side, quiet };
@@ -554,7 +753,7 @@ export class IslandGame {
     for (const s of ['A', 'B']) {
       const p = this.players[s];
       players[s] = {
-        connected: p.connected, name: p.name, kb: p.kb,
+        connected: p.connected, name: p.name, kb: p.kb, bot: p.bot,
         x: r3(p.x), y: r3(p.y), z: r3(p.z), vx: r3(p.vx), vz: r3(p.vz), vy: r3(p.vy), facing: r3(p.facing),
         grounded: p.grounded, dead: p.dead, respawnIn: p.dead ? Math.max(0, p.respawnAt - this.now) : 0,
         ability: p.ability, hitAge: r3(this.now - p.hitAt), onTower: p.onTower, pad: p.padKind, padT: p.padT ? r3(p.padT / PAD_TIME) : 0,
@@ -564,7 +763,7 @@ export class IslandGame {
     if (this.flight) { const f = this.flight; flight = { kind: f.kind, from: f.from, to: f.to, p: r3(clamp((this.now - f.t0) / f.dur, 0, 1)), c: f.c, r: f.r, ok: f.ok }; }
     const regrow = this.regrow.map((g) => ({ c: g.c, r: g.r, kind: g.kind, in: r3(Math.max(0, g.at - this.now)) }));
     return {
-      game: 'island', phase: this.phase, t: Math.round(this.now * 1000), timeLeft: Math.ceil(this.timeLeft), mode: this.playerCount(),
+      game: 'island', phase: this.phase, t: Math.round(this.now * 1000), timeLeft: Math.ceil(this.timeLeft), mode: this.playerCount(), humans: this.humanCount(), bots: this.botCount(),
       countdown: this.phase === 'countdown' ? Math.max(0, this.countdownAt - this.now) : 0,
       grid: { cols: COLS, rows: ROWS, cx: CX, cz: CZ, s: S, tileH: TILE_H },
       tiles, plats, regrow,
