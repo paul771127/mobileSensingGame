@@ -8,10 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import QRCode from 'qrcode';
 import { Game } from './game.js';
+import { IslandGame } from './island.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const CERT_DIR = path.join(__dirname, '..', 'certs');
+const THREE_DIR = path.join(__dirname, '..', 'node_modules', 'three');
 const PORT = Number(process.env.PORT || 8443);
 
 const MIME = {
@@ -23,6 +25,7 @@ const MIME = {
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
   '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
   '.woff2': 'font/woff2', '.woff': 'font/woff',
+  '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.bin': 'application/octet-stream',
 };
 
 // ---------- HTTP ----------
@@ -44,13 +47,19 @@ async function handleHttp(req, res) {
   if (pathname === '/') pathname = '/index.html';
   if (pathname === '/display') pathname = '/display.html';
   if (pathname === '/controller' || pathname === '/c') pathname = '/controller.html';
+  // 《島口大開》
+  if (pathname === '/island' || pathname === '/island/') pathname = '/island/display.html';
+  if (pathname === '/island/controller' || pathname === '/island/c') pathname = '/island/controller.html';
 
-  const filePath = path.normalize(path.join(PUBLIC_DIR, pathname));
-  if (!filePath.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end(); }
+  // Three.js 由 node_modules 直接提供（/vendor/three/… → node_modules/three/…）
+  let baseDir = PUBLIC_DIR;
+  if (pathname.startsWith('/vendor/three/')) { baseDir = THREE_DIR; pathname = pathname.slice('/vendor/three'.length); }
+  const filePath = path.normalize(path.join(baseDir, pathname));
+  if (!filePath.startsWith(baseDir)) { res.writeHead(403); return res.end(); }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not found'); }
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': baseDir === THREE_DIR ? 'public, max-age=86400' : 'no-cache' });
     res.end(data);
   });
 }
@@ -71,9 +80,10 @@ if (fs.existsSync(keyPath) && fs.existsSync(certPath)) {
 const rooms = new Map(); // code -> Room
 
 class Room {
-  constructor(code) {
+  constructor(code, kind = 'tennis') {
     this.code = code;
-    this.game = new Game();
+    this.kind = kind; // tennis | island
+    this.game = kind === 'island' ? new IslandGame() : new Game();
     this.displays = new Set();
     this.controllers = { A: null, B: null };
     this.lastActivity = Date.now();
@@ -97,10 +107,10 @@ function newRoomCode() {
   }
 }
 
-function getOrCreateRoom(code) {
+function getOrCreateRoom(code, kind) {
   if (code && rooms.has(code)) return rooms.get(code);
   const c = code && /^[A-Z0-9]{4}$/.test(code) ? code : newRoomCode();
-  const room = new Room(c);
+  const room = new Room(c, kind);
   rooms.set(c, room);
   return room;
 }
@@ -130,21 +140,25 @@ wss.on('connection', (ws) => {
 
 function handleMessage(ws, msg) {
   const room = ws.meta.room;
+  if (room && room.kind === 'island' && handleIslandMessage(ws, room, msg)) return;
   switch (msg.type) {
     case 'join': {
-      // { type:'join', role:'display'|'controller', room?:'ABCD', side?:'A'|'B', name? }
+      // { type:'join', role:'display'|'controller', room?:'ABCD', side?:'A'|'B', name?, game?:'tennis'|'island' }
       leave(ws);
       const code = (msg.room || '').toUpperCase();
       if (msg.role === 'controller' && !rooms.has(code)) {
         return safeSend(ws, JSON.stringify({ type: 'error', code: 'no_room', text: '找不到這個房號' }));
       }
-      const r = getOrCreateRoom(code);
+      const r = getOrCreateRoom(code, msg.game === 'island' ? 'island' : 'tennis');
+      if (msg.role === 'controller' && msg.game && msg.game !== r.kind) {
+        return safeSend(ws, JSON.stringify({ type: 'error', code: 'wrong_game', text: r.kind === 'island' ? '這是《島口大開》的房間，請用島口大開的手機頁面' : '這是球拍對戰的房間，請用球拍的手機頁面' }));
+      }
       ws.meta.room = r;
       ws.meta.role = msg.role;
       r.lastActivity = Date.now();
       if (msg.role === 'display') {
         r.displays.add(ws);
-        safeSend(ws, JSON.stringify({ type: 'joined', role: 'display', room: r.code, hosts: lanAddresses(), port: PORT, secure: isSecure }));
+        safeSend(ws, JSON.stringify({ type: 'joined', role: 'display', room: r.code, game: r.kind, hosts: lanAddresses(), port: PORT, secure: isSecure }));
       } else {
         const cid = typeof msg.cid === 'string' ? msg.cid.slice(0, 40) : null;
         // 同一支手機重連：踢掉舊連線、接回原位
@@ -163,8 +177,8 @@ function handleMessage(ws, msg) {
         r.controllers[side] = ws;
         ws.meta.side = side;
         const name = String(msg.name || '').slice(0, 12) || undefined;
-        r.game.setConnected(side, true, name);
-        safeSend(ws, JSON.stringify({ type: 'joined', role: 'controller', room: r.code, side }));
+        r.game.setConnected(side, true, name); // 真人手機接手鍵盤除錯位
+        safeSend(ws, JSON.stringify({ type: 'joined', role: 'controller', room: r.code, game: r.kind, side }));
         r.broadcast({ type: 'players', players: { A: r.game.players.A.connected, B: r.game.players.B.connected } });
       }
       safeSend(ws, JSON.stringify({ type: 'state', state: r.game.snapshot() }));
@@ -219,6 +233,41 @@ function handleMessage(ws, msg) {
       break;
     }
   }
+}
+
+// 《島口大開》專用訊息；回傳 true 表示已處理
+function handleIslandMessage(ws, room, msg) {
+  const game = room.game;
+  const isCtrl = ws.meta.role === 'controller';
+  const isDisplay = ws.meta.role === 'display';
+  switch (msg.type) {
+    case 'move':   // 手機雙軸傾斜 { x:-1..1, y:-1..1 }
+      if (isCtrl) game.setMove(ws.meta.side, msg.x, msg.y);
+      return true;
+    case 'act':    // { kind:'jump'|'hit' }
+      if (isCtrl && (msg.kind === 'jump' || msg.kind === 'hit')) { room.lastActivity = Date.now(); game.action(ws.meta.side, msg.kind); }
+      return true;
+    case 'kb': {   // 顯示端鍵盤除錯玩家 { side, on }：只能占用沒有手機的位置
+      const side = msg.side === 'A' || msg.side === 'B' ? msg.side : null;
+      if (!isDisplay || !side || room.controllers[side]) return true;
+      game.setConnected(side, msg.on !== false, '鍵盤', true);
+      room.broadcast({ type: 'players', players: { A: game.players.A.connected, B: game.players.B.connected } });
+      return true;
+    }
+    case 'input': { // 顯示端鍵盤輸入 { side, x, y, act? }
+      const side = msg.side === 'A' || msg.side === 'B' ? msg.side : null;
+      if (!isDisplay || !side || room.controllers[side] || !game.players[side].kb) return true;
+      if (msg.x != null || msg.y != null) game.setMove(side, msg.x ?? 0, msg.y ?? 0);
+      if (msg.act === 'jump' || msg.act === 'hit') game.action(side, msg.act);
+      return true;
+    }
+    case 'swing': case 'offset': case 'pose': case 'bot':
+      return true; // 球拍遊戲的訊息，島上忽略
+    case 'reset':
+      game.resetMatch();
+      return true;
+  }
+  return false;
 }
 
 function leave(ws) {
@@ -301,8 +350,9 @@ process.on('unhandledRejection', (e) => console.error('unhandledRejection', e));
 server.listen(PORT, () => {
   const proto = isSecure ? 'https' : 'http';
   console.log(`\n🎾 Mobile Sensing Game server`);
-  console.log(`   顯示端（電視/電腦）: ${proto}://localhost:${PORT}/display`);
-  for (const h of lanAddresses()) console.log(`   區網網址:            ${proto}://${h}:${PORT}/display`);
+  console.log(`   球拍對戰顯示端:      ${proto}://localhost:${PORT}/display`);
+  console.log(`   島口大開顯示端:      ${proto}://localhost:${PORT}/island`);
+  for (const h of lanAddresses()) console.log(`   區網網址:            ${proto}://${h}:${PORT}/`);
   if (!isSecure) {
     const sep = process.platform === 'win32' ? '\\' : '/';
     const ips = lanAddresses().slice(0, 2).join(' ');

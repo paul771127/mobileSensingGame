@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>島口大開 - 手機</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  :root { --blue: #3aa0ff; --orange: #ff9f2e; }
+  html, body { overflow: hidden; height: 100%; touch-action: none; -webkit-user-select: none; user-select: none; }
+  body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .screen { display: none; }
+  .screen.on { display: flex; }
+  #join, #calibScreen { flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 100vh; padding: 24px; text-align: center; }
+  #play { flex-direction: column; height: 100vh; height: 100dvh; }
+  #top { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; font-size: 14px; color: var(--muted); }
+  #main { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 8px 16px; text-align: center; transition: background .12s; }
+  #look { font-size: 30px; font-weight: 900; line-height: 1.15; }
+  #look small { display: block; font-size: 14px; color: var(--muted); font-weight: 500; margin-top: 6px; }
+  #badge { width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; font-size: 40px; font-weight: 900; color: #111; box-shadow: 0 12px 30px rgba(0,0,0,.4); flex: none; }
+  .side-A #badge { background: var(--blue); } .side-B #badge { background: var(--orange); }
+  #gest { font-size: 22px; font-weight: 800; min-height: 30px; }
+  #tilt { width: 120px; height: 120px; flex: none; border-radius: 50%; border: 2px solid #2a3560; position: relative; background: radial-gradient(circle, #1b2242 0 38%, transparent 40%); }
+  #tilt i { position: absolute; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); left: 50%; top: 50%; transform: translate(-50%, -50%); transition: transform .05s linear; }
+  #bottom { flex: none; display: flex; gap: 8px; padding: 10px 14px 14px; flex-wrap: wrap; justify-content: center; }
+  #bottom .btn { padding: 10px 12px; font-size: 14px; }
+  .taps { display: flex; gap: 10px; width: 100%; }
+  .taps .btn { flex: 1; padding: 16px; font-size: 19px; }
+  #sideSel { display: flex; gap: 10px; }
+  #sideSel button { min-width: 120px; }
+  #sideSel button.on { outline: 3px solid var(--accent); }
+  .flash-jump { background: rgba(58,160,255,.22) !important; }
+  .flash-hit { background: rgba(217,255,74,.22) !important; }
+  #debug { font-size: 10px; color: #667; font-family: ui-monospace, monospace; white-space: pre; opacity: .75; text-align: center; min-height: 36px; }
+  .pose { width: 120px; height: 120px; }
+</style>
+</head>
+<body>
+
+<section id="join" class="screen on">
+  <h1 style="margin:0">🏝 島口大開</h1>
+  <p class="muted">輸入電腦畫面上的房號，或掃 QR code</p>
+  <input id="room" class="code" maxlength="4" placeholder="ABCD" autocomplete="off" autocapitalize="characters">
+  <input id="name" class="code" style="font-size:18px;letter-spacing:0;width:220px" maxlength="12" placeholder="你的名字（選填）">
+  <div id="sideSel">
+    <button class="btn secondary" data-side="A">🔵 藍修島員</button>
+    <button class="btn secondary" data-side="B">🟠 橘修島員</button>
+  </div>
+  <button id="go" class="btn">加入並開啟感測器</button>
+  <p id="joinMsg" class="muted" style="min-height:20px;font-size:14px"></p>
+</section>
+
+<section id="calibScreen" class="screen">
+  <h2 style="margin:0">📱 持握校正</h2>
+  <svg class="pose" viewBox="0 0 120 120" fill="none" stroke="#9aa3c7" stroke-width="4" stroke-linecap="round">
+    <rect x="42" y="30" width="36" height="66" rx="7" transform="rotate(-25 60 63)" stroke="#d9ff4a"/>
+    <path d="M30 100 q30 -10 60 0" />
+  </svg>
+  <p style="max-width:320px;margin:0">像拿遙控器一樣<b>自然握著手機</b>，螢幕微微朝自己，<b>正對電腦螢幕</b>，保持不動後按下方按鈕。這個姿勢就是「站著不動」的基準。</p>
+  <p id="calibLive" class="muted" style="font-size:14px;min-height:20px">等待姿態感測器…</p>
+  <button id="calibDone" class="btn" disabled>完成校正</button>
+  <p class="muted" style="font-size:13px;max-width:320px">之後：手機<b>前後左右傾斜</b>走位、手腕<b>短促上抬</b>跳躍、<b>向前短推</b>敲擊。</p>
+</section>
+
+<section id="play" class="screen">
+  <div id="top">
+    <span id="roomLabel"></span>
+    <span id="conn">連線中…</span>
+    <button id="leave" class="btn secondary" style="padding:6px 10px;font-size:12px">離開</button>
+  </div>
+  <div id="main">
+    <div id="badge">藍</div>
+    <div id="look">請看電腦螢幕<small>傾斜走位 · 上抬跳躍 · 前推敲擊</small></div>
+    <div id="tilt"><i></i></div>
+    <div id="gest"></div>
+    <div id="sub" class="muted" style="font-size:14px;min-height:20px"></div>
+    <div id="debug"></div>
+  </div>
+  <div id="bottom">
+    <div class="taps">
+      <button id="tapJump" class="btn secondary">⤒ 點一下跳</button>
+      <button id="tapHit" class="btn">🔨 點一下敲</button>
+    </div>
+    <button id="calib" class="btn secondary">重新校正持握</button>
+    <button id="sens" class="btn secondary">手勢靈敏度：中</button>
+    <button id="flipY" class="btn secondary">前後反轉：關</button>
+    <button id="flipX" class="btn secondary">左右反轉：關</button>
+    <button id="vib" class="btn secondary">震動：開</button>
+  </div>
+</section>
+
+<script type="module" src="/island/controller.js"></script>
+</body>
+</html>

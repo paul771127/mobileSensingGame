@@ -1,16 +1,18 @@
 {
   "name": "mobile-sensing-game",
   "version": "0.1.0",
-  "description": "手機當球拍的體感對戰遊戲：手機感測器揮拍，大螢幕顯示球場",
+  "description": "手機體感遊戲合集：球拍對戰（手機當球拍）與《島口大開》（3D 浮島合作動作）",
   "main": "server/index.js",
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
+    "dev": "node --watch server/index.js",
+    "test": "node test/island-loop.test.mjs"
   },
   "license": "MIT",
   "dependencies": {
     "qrcode": "^1.5.4",
+    "three": "^0.170.0",
     "ws": "^8.18.0"
   }
 }
