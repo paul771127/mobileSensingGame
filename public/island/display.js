@@ -68,6 +68,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x3c5878);
 scene.fog = new THREE.Fog(0x3c5878, 38, 70);
 const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
+const WHITE = new THREE.Color(0xffffff);
 const CAM_DIR = new THREE.Vector3(0.05, 1.0, 0.8).normalize();
 
 scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x3a2a1a, 0.9));
@@ -103,6 +104,7 @@ function fitCamera() {
   }
   camera.position.copy(center).addScaledVector(CAM_DIR, hi);
   camera.lookAt(center);
+  camBase.copy(camera.position);
   sun.target.position.copy(center);
 }
 function resize() {
@@ -339,7 +341,7 @@ function buildStatic(s) {
     playerViews[side] = {
       root, model, marker, label, abil, ring, shadow, abilKind: null,
       parts: { armL: model.getObjectByName('Arm_L'), armR: model.getObjectByName('Arm_R'), legL: model.getObjectByName('Leg_L'), legR: model.getObjectByName('Leg_R') },
-      pos: new THREE.Vector3(), phase: 0,
+      pos: new THREE.Vector3(), phase: 0, lastHitAge: 99, wasGrounded: true, squash: 0, airT: 0,
     };
   }
   // 鏡頭範圍
@@ -391,6 +393,63 @@ function syncTiles(s) {
 }
 
 // ---------- 狀態事件 → HUD ----------
+
+// ---------- 打擊特效：揮擊弧光、命中爆點、飄字、鏡頭震動 ----------
+const fxList = []; // { obj, t, dur, tick(q) }
+let shakeAmt = 0, bossFlash = 0, bossJolt = 0, bossMats = null;
+const camBase = new THREE.Vector3();
+function addFx(obj, dur, tick) { world.add(obj); fxList.push({ obj, t: 0, dur, tick }); return obj; }
+function burstTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256; const g = c.getContext('2d');
+  g.translate(128, 128); g.fillStyle = '#fff';
+  g.beginPath(); for (let i = 0; i < 20; i++) { const a = i / 20 * Math.PI * 2, r = i % 2 ? 46 : 120; g.lineTo(Math.cos(a) * r, Math.sin(a) * r); } g.closePath(); g.fill();
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+const burstTex = burstTexture();
+function spawnSwoosh(p, color, big) {
+  // 玩家面前的扇形弧光：不管有沒有打中都看得到自己揮了
+  const R = big ? 2.6 : 1.6;
+  const geo = new THREE.RingGeometry(R * 0.45, R, 24, 1, -1.15, 2.3);
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).lerp(WHITE, 0.55), transparent: true, opacity: 1, side: THREE.DoubleSide, depthWrite: false, depthTest: false }));
+  m.rotation.order = 'YXZ'; m.rotation.x = -Math.PI / 2; m.rotation.y = p.facing - Math.PI / 2; m.position.set(p.x, p.y + 0.55, p.z); m.renderOrder = 8;
+  addFx(m, 0.28, (q) => { m.scale.setScalar(0.55 + q * 0.6); m.material.opacity = Math.min(1, 1.6 * (1 - q)); m.rotation.y = p.facing - Math.PI / 2 + (q - 0.5) * 0.9; });
+}
+function spawnImpact(x, y, z, color, text, size = 1) {
+  const star = new THREE.Sprite(new THREE.SpriteMaterial({ map: burstTex, color: 0xffffff, transparent: true, depthTest: false })); star.position.set(x, y, z); star.renderOrder = 12;
+  addFx(star, 0.3, (q) => { star.scale.setScalar(size * (1.2 + q * 2.6)); star.material.opacity = 1 - q * q; star.material.rotation = q * 0.6; star.material.color.set(q < 0.25 ? 0xffffff : color); });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.75, 1, 32), new THREE.MeshBasicMaterial({ color, transparent: true, side: THREE.DoubleSide, depthTest: false })); ring.position.set(x, y, z); ring.quaternion.copy(camera.quaternion); ring.renderOrder = 11;
+  addFx(ring, 0.45, (q) => { ring.scale.setScalar(size * (0.6 + q * 3.2)); ring.material.opacity = 0.9 * (1 - q); });
+  for (let i = 0; i < 10; i++) {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshBasicMaterial({ color: i % 3 ? color : 0xffffff, transparent: true }));
+    const a = Math.random() * Math.PI * 2, sp = 3 + Math.random() * 4, vy = 3 + Math.random() * 4;
+    addFx(s, 0.55, (q) => { const t = q * 0.55; s.position.set(x + Math.cos(a) * sp * t, y + vy * t - 10 * t * t, z + Math.sin(a) * sp * t); s.rotation.set(q * 9, q * 7, 0); s.material.opacity = 1 - q; });
+  }
+  if (text) { const tx = textSprite(text, '#fff', 'rgba(0,0,0,0)', 1.5 * size); tx.position.set(x, y + 0.6, z); addFx(tx, 0.9, (q) => { tx.position.y = y + 0.6 + q * 1.8; tx.material.opacity = q < 0.6 ? 1 : 1 - (q - 0.6) / 0.4; }); }
+}
+function spawnDust(x, y, z, size = 1) {
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.42, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, side: THREE.DoubleSide, depthWrite: false })); ring.rotation.x = -Math.PI / 2; ring.position.set(x, y + 0.03, z);
+  addFx(ring, 0.35, (q) => { ring.scale.setScalar(size * (0.8 + q * 2.2)); ring.material.opacity = 0.7 * (1 - q); });
+}
+function updateFx(dt) {
+  for (let i = fxList.length - 1; i >= 0; i--) {
+    const f = fxList[i]; f.t += dt; const q = Math.min(1, f.t / f.dur); f.tick(q);
+    if (q >= 1) { world.remove(f.obj); f.obj.geometry?.dispose?.(); f.obj.material?.dispose?.(); fxList.splice(i, 1); }
+  }
+  shakeAmt = Math.max(0, shakeAmt - dt * 2.4); bossFlash = Math.max(0, bossFlash - dt * 5); bossJolt = Math.max(0, bossJolt - dt * 4);
+  camera.position.copy(camBase);
+  if (shakeAmt > 0) { camera.position.x += (Math.random() - 0.5) * shakeAmt; camera.position.y += (Math.random() - 0.5) * shakeAmt; }
+}
+// 每位玩家新的一次敲擊：依伺服器回報的結果（core / brick / bell / miss）放特效
+function onPlayerHit(side, p, s) {
+  const color = COLORS[side];
+  spawnSwoosh(p, color, p.ability === 'hammer');
+  const b = s.boss;
+  if (p.hit === 'core') { spawnImpact(b.x + b.core.x, b.y + b.core.y, b.z + b.core.z, 0xff3fd0, '-1', 1.3); shakeAmt = 0.55; bossFlash = 1; bossJolt = 1; popHearts(); }
+  else if (p.hit === 'brick') { spawnImpact(b.x + b.mouthOff.x, b.y + b.mouthOff.y, b.z + b.mouthOff.z, 0xffd23f, '鏘！', 1.1); shakeAmt = 0.4; bossFlash = 0.8; bossJolt = 0.8; }
+  else if (p.hit === 'bell') { spawnImpact(s.tower.x + (s.tower.bellX || 0), s.tower.bellY + 0.3, s.tower.z + (s.tower.bellZ || 0), 0xffe07a, '噹！', 1.2); shakeAmt = 0.35; }
+}
+function popHearts() { const hp = $('hp'); hp.classList.remove('pop'); void hp.offsetWidth; hp.classList.add('pop'); }
+
 let lastEventT = -1, bannerUntil = 0;
 let built = false;
 function onState(s) {
@@ -492,6 +551,19 @@ function frame(now) {
     if (v.pos.distanceTo(tmpV) > 3) v.pos.copy(tmpV); else v.pos.lerp(tmpV, k);
     v.root.position.copy(v.pos);
     v.model.rotation.y = lerpAngle(v.model.rotation.y, p.facing, k);
+    if (p.hitAge < v.lastHitAge - 0.05) onPlayerHit(side, p, s);
+    v.lastHitAge = p.hitAge;
+    // 跳躍：起跳拉長、落地壓扁、腳下揚塵，影子隨高度縮小
+    if (v.wasGrounded && !p.grounded && p.vy > 2) { v.squash = -1; spawnDust(p.x, p.y, p.z); }
+    if (!v.wasGrounded && p.grounded) { if (v.airT > 0.25) { v.squash = 1; spawnDust(p.x, p.y, p.z, 1.4); } }
+    v.airT = p.grounded ? 0 : v.airT + dt; v.wasGrounded = p.grounded;
+    v.squash *= Math.exp(-dt * 9);
+    // 敲擊時整個人往前撲一下
+    const lunge = p.hitAge < 0.1 ? -0.12 : p.hitAge < 0.3 ? 0.38 * Math.sin((p.hitAge - 0.1) / 0.2 * Math.PI) : 0;
+    v.model.position.set(Math.sin(p.facing) * lunge, 0, Math.cos(p.facing) * lunge);
+    const sy = 1 - v.squash * 0.28 + (p.grounded ? 0 : 0.08), sxz = 1 + v.squash * 0.22;
+    v.model.scale.set(sxz, sy, sxz);
+    v.model.rotation.x = p.hitAge < 0.3 ? 0.35 * Math.sin(p.hitAge / 0.3 * Math.PI) : (p.grounded ? 0 : -0.15);
     const speed = Math.hypot(p.vx, p.vz);
     v.phase += dt * (6 + speed * 2.2);
     const run = Math.min(1, speed / 3.5);
@@ -508,15 +580,16 @@ function frame(now) {
     if (armR) {
       const h = p.hitAge;
       let target = p.grounded ? Math.sin(v.phase) * 0.75 * run : -1.2;
-      if (h < 0.1) target = -2.3;
-      else if (h < 0.35) target = lerp(-2.3, 1.1, (h - 0.1) / 0.25);
-      else if (h < 0.6) target = lerp(1.1, target, (h - 0.35) / 0.25);
-      armR.rotation.x = lerp(armR.rotation.x, target, h < 0.6 ? 0.6 : k);
+      if (h < 0.1) target = -2.9;
+      else if (h < 0.3) target = lerp(-2.9, 1.3, (h - 0.1) / 0.2);
+      else if (h < 0.55) target = lerp(1.3, target, (h - 0.3) / 0.25);
+      armR.rotation.x = lerp(armR.rotation.x, target, h < 0.55 ? 0.75 : k);
+      armR.scale.setScalar(h < 0.4 ? 1 + 0.9 * Math.sin(h / 0.4 * Math.PI) : 1); // 揮擊瞬間槌子放大
     }
     v.marker.position.y = 2.25 + Math.sin(T * 4 + (side === 'A' ? 0 : 1)) * 0.08;
     v.marker.rotation.y = T * 2;
-    v.ring.visible = p.hitAge < 0.3; if (v.ring.visible) { const q = p.hitAge / 0.3; v.ring.scale.setScalar(0.6 + q * 1.4 * (p.ability === 'hammer' ? 1.6 : 1)); v.ring.material.opacity = 0.8 * (1 - q); }
-    v.shadow.position.y = -p.y + 0.015;
+    v.ring.visible = false && p.hitAge < 0.3; if (v.ring.visible) { const q = p.hitAge / 0.3; v.ring.scale.setScalar(0.6 + q * 1.4 * (p.ability === 'hammer' ? 1.6 : 1)); v.ring.material.opacity = 0.8 * (1 - q); }
+    v.shadow.position.y = -p.y + 0.015; v.shadow.scale.setScalar(Math.max(0.45, 1 - Math.max(0, p.y) * 0.22));
     v.shadow.visible = p.y > -1;
     if (p.ability !== v.abilKind) {
       v.abilKind = p.ability; v.root.remove(v.abil);
@@ -536,10 +609,14 @@ function frame(now) {
   if (bossParts.jaw) bossParts.jaw.rotation.x = lerp(bossParts.jaw.rotation.x, open * 0.65, 1 - Math.exp(-dt * 10));
   if (bossParts.core) {
     bossParts.core.visible = b.state === 'open';
-    const pulse = 1 + Math.sin(T * 8) * 0.12 + (b.coreHitAge < 0.25 ? 0.6 * (1 - b.coreHitAge / 0.25) : 0);
+    const pulse = 1 + Math.sin(T * 8) * 0.12 - (b.coreHitAge < 0.3 ? 0.45 * (1 - b.coreHitAge / 0.3) : 0); // 被打中先縮一下
     bossParts.core.scale.setScalar(pulse);
     if (bossParts.core.material?.emissiveIntensity != null) bossParts.core.material.emissiveIntensity = 0.9 + Math.sin(T * 8) * 0.5;
   }
+  if (!bossMats) { bossMats = []; bossObj.traverse((o) => { if (o.isMesh && o !== bossParts.core && o.material?.emissive) { o.material = o.material.clone(); bossMats.push({ m: o.material, e: o.material.emissive.clone(), i: o.material.emissiveIntensity }); } }); }
+  for (const { m, e, i } of bossMats) { m.emissive.copy(e).lerp(WHITE, bossFlash); m.emissiveIntensity = lerp(i, 1.6, bossFlash); }
+  bossObj.position.z -= bossJolt * 0.45; bossObj.rotation.x = -bossJolt * 0.22;
+  const bj = Math.sin(bossJolt * Math.PI); bossObj.scale.set(1 + bj * 0.14, 1 - bj * 0.12, 1 + bj * 0.14);
   bossObj.rotation.y = 0; bossObj.rotation.z = b.state === 'rest' || b.state === 'aim' ? Math.sin(T * 1.5) * 0.03 : 0;
   // 嘴裡的磚
   if (bossParts.socket) {
@@ -617,6 +694,7 @@ function frame(now) {
   // 鐘
   if (bellPivot) { bellSwing = Math.max(0, bellSwing - dt * 0.35); bellPivot.rotation.z = Math.sin(T * 12) * 0.5 * bellSwing; }
 
+  updateFx(dt);
   renderer.render(scene, camera);
 }
 function platTopAt(c, r, s) { const p = s.plats.find((x) => x[0] === c && x[1] === r); if (p) return p[3]; return s.tiles.some((t) => t[0] === c && t[1] === r) ? s.grid.tileH : 0; }

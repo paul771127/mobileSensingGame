@@ -294,3 +294,22 @@ setInterval(() => { if (joined && document.visibilityState === 'visible') ws.sen
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 if (room) $('go').focus();
+
+
+// ---------- 防止手機頁面被放大 ----------
+// iOS Safari 不理會 user-scalable=no：擋掉雙指縮放手勢與連點放大；萬一還是被放大，重寫 viewport 把它拉回 1 倍。
+for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(t, (e) => e.preventDefault(), { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => { const now = Date.now(); if (now - lastTouchEnd < 350 && !e.target.closest?.('input, textarea, select')) { e.preventDefault(); e.target.closest?.('button')?.click(); } lastTouchEnd = now; } // 擋掉連點放大，但按鈕照樣算一次點擊, { passive: false });
+function resetZoom() {
+  const vv = window.visualViewport; if (!vv || vv.scale <= 1.02) return;
+  const meta = document.querySelector('meta[name=viewport]'); if (!meta) return;
+  const base = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover';
+  meta.setAttribute('content', 'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');
+  setTimeout(() => meta.setAttribute('content', base), 300);
+  window.scrollTo(0, 0);
+}
+window.visualViewport?.addEventListener('resize', resetZoom);
+window.visualViewport?.addEventListener('scroll', resetZoom);

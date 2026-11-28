@@ -30,7 +30,7 @@ const key = (c, r) => `${c},${r}`;
 const PLAYER_SPEED = 4.2;
 const AIR_CONTROL = 0.6;
 const GRAVITY = 20;
-const JUMP_VY = 7.5;          // 跳高約 1.4
+const JUMP_VY = 8.6;          // 跳高約 1.85（比角色高，斜俯視也看得出來）
 const SPRING_VY = 13;         // 彈簧跳高約 4.2
 const STEP_UP = 0.9;
 const DEATH_Y = -6;
@@ -164,7 +164,7 @@ export class IslandGame {
     const n = this.humanCount(); // 敲磚與弱點窗口長度以真人數為準，電腦搭檔不縮短窗口
     if (this.phase === 'lobby') {
       // 任一玩家「敲擊」開始倒數
-      for (const s of ['A', 'B']) { const p = this.players[s]; if (p.connected && p.hitReq) { this.startCountdown(); } p.hitReq = false; p.jumpReq = false; }
+      for (const s of ['A', 'B']) { const p = this.players[s]; if (p.connected && p.hitReq) { this.startCountdown(); p.hitAt = this.now; p.hitKind = 'miss'; } p.hitReq = false; } // 大廳可以先試跳
       this.updatePlayers(dt, true);
       return;
     }
@@ -287,7 +287,7 @@ export class IslandGame {
       if (p.hitReq) {
         p.hitReq = false;
         if (this.now >= p.hitCd && !lobby) { p.hitCd = this.now + HIT_COOLDOWN; p.hitAt = this.now; this.resolveHit(p); }
-        else if (lobby) p.hitAt = this.now;
+        else if (lobby) { p.hitAt = this.now; p.hitKind = 'miss'; }
       }
     }
   }
@@ -341,18 +341,19 @@ export class IslandGame {
     if (b.state === 'open' && this.inReach(p, this.corePos(), 1.8)) {
       b.hp = Math.max(0, b.hp - 1);
       this.pushEvent('corehit', b.hp > 0 ? `${this.label(p.side)} 打中核心！剩 ${b.hp}` : '核心碎了！', p.side);
-      b.coreHitT = this.now;
+      b.coreHitT = this.now; p.hitKind = 'core';
       if (b.hp <= 0) this.finish('win');
       return;
     }
     // 2. 卡住的巨怪 → 敲飛嘴裡的磚
     if (b.state === 'stuck' && b.held && this.inReach(p, this.mouthPos(), 2.2)) {
-      this.knockBrick(p);
+      p.hitKind = 'brick'; this.knockBrick(p);
       return;
     }
     // 3. 鐘
-    if (this.inReach(p, this.bellPos(), 2.5) && p.onTower) { this.ringBell(p); return; }
+    if (this.inReach(p, this.bellPos(), 2.5) && p.onTower) { p.hitKind = 'bell'; this.ringBell(p); return; }
     // 落空
+    p.hitKind = 'miss';
     this.pushEvent('whiff', '', p.side, true);
   }
 
@@ -763,7 +764,7 @@ export class IslandGame {
         connected: p.connected, name: p.name, kb: p.kb, bot: p.bot,
         x: r3(p.x), y: r3(p.y), z: r3(p.z), vx: r3(p.vx), vz: r3(p.vz), vy: r3(p.vy), facing: r3(p.facing),
         grounded: p.grounded, dead: p.dead, respawnIn: p.dead ? Math.max(0, p.respawnAt - this.now) : 0,
-        ability: p.ability, hitAge: r3(this.now - p.hitAt), onTower: p.onTower, pad: p.padKind, padT: p.padT ? r3(p.padT / PAD_TIME) : 0,
+        ability: p.ability, hitAge: r3(this.now - p.hitAt), hit: p.hitKind || 'miss', onTower: p.onTower, pad: p.padKind, padT: p.padT ? r3(p.padT / PAD_TIME) : 0,
       };
     }
     let flight = null;

@@ -16,6 +16,8 @@
   #timer.low { color: var(--hp); }
   #hp { display: flex; gap: 6px; align-items: center; font-weight: 800; }
   #hp .heart { width: 22px; height: 22px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: var(--hp); box-shadow: 0 0 10px rgba(255,79,122,.6); transform: rotate(45deg) scale(.8); }
+  #hp.pop { animation: hppop .35s ease-out; }
+  @keyframes hppop { 0% { transform: scale(1); } 30% { transform: scale(1.35) rotate(-3deg); filter: brightness(2); } 100% { transform: scale(1); } }
   #hp .heart.off { background: #2a3560; box-shadow: none; }
   #mode { color: var(--muted); font-size: 14px; }
   #roombox { left: 16px; top: 14px; display: flex; gap: 12px; align-items: center; }
