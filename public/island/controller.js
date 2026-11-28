@@ -38,7 +38,7 @@ function onMessage(msg) {
     mySide = msg.side; room = msg.room; joined = true;
     show(playScreen);
     document.body.className = `side-${mySide}`;
-    $('badge').textContent = mySide === 'A' ? '藍' : '橘';
+    $('badge').textContent = { A: '藍', B: '橘', C: '紫', D: '綠' }[mySide] || mySide;
     $('roomLabel').innerHTML = `房號 <b>${room}</b>`;
     const u = new URL(location.href); u.searchParams.set('room', room); u.searchParams.set('side', mySide); history.replaceState(null, '', u);
     requestWakeLock();
@@ -55,17 +55,13 @@ function renderState(s) {
   if (!mySide || gestFlashing) return;
   const me = s.players?.[mySide];
   let sub = '';
-  const other = s.players?.[mySide === 'A' ? 'B' : 'A'];
-  const showBot = s.phase === 'lobby' && other && (!other.connected || other.bot);
-  $('botBtn').style.display = showBot ? '' : 'none';
-  $('botBtn').textContent = other?.bot ? '🤖 電腦搭檔已上場（再按一次移除）' : '🤖 只有一個人？讓電腦當搭檔';
-  if (s.phase === 'lobby') sub = s.bots ? '電腦搭檔就位，向前短推開始' : '向前短推（敲擊）開始遊戲';
+  if (s.phase === 'lobby') sub = '向前短推（或按下方按鈕）開始';
   else if (s.phase === 'countdown') sub = '準備…';
+  else if (s.phase === 'upgrade') sub = me?.pick?.done ? '已選好，等隊友' : '左右傾斜切換技能，回正停住確認';
   else if (s.phase === 'win' || s.phase === 'lose') sub = '向前短推再來一局';
-  else if (me?.dead) sub = `掉下去了，${me.respawnIn.toFixed(1)} 秒後復活`;
-  else if (s.marks?.target === mySide) sub = '巨怪盯上你了：站上想讓它咬的磚，鎖定後跳開';
-  else if (s.boss?.state === 'stuck') sub = '巨怪卡住了！從側邊敲它';
-  else if (s.boss?.state === 'open') sub = '防護打開！打核心';
+  else if (me?.downed) sub = s.n >= 2 ? '倒地了，等隊友靠近救援' : '倒地了，等一下自己爬起';
+  else if (s.boss?.state === 'exposed') sub = '核心露出！上前打';
+  else if (s.boss?.target === mySide && (s.boss.state === 'aim' || s.boss.state === 'lock')) sub = '巨怪盯上你了：離開地上的咬痕範圍';
   $('sub').textContent = sub;
 }
 
@@ -319,7 +315,6 @@ function flashGesture(text, kind) {
 // 備援按鈕（沒有感測器 / 桌機測試）
 $('tapJump').addEventListener('pointerdown', (e) => { e.preventDefault(); if (joined) sendAct('jump'); });
 $('tapHit').addEventListener('pointerdown', (e) => { e.preventDefault(); if (joined) sendAct('hit'); });
-$('botBtn').onclick = () => { const other = lastState?.players?.[mySide === 'A' ? 'B' : 'A']; ws.send({ type: 'bot', on: !(other && other.bot) }); };
 $('sens').onclick = () => { sensIdx = (sensIdx + 1) % SENS.length; $('sens').textContent = `手勢靈敏度：${SENS[sensIdx].label}`; };
 $('flipY').onclick = () => { flipY = !flipY; $('flipY').textContent = `前後反轉：${flipY ? '開' : '關'}`; };
 $('flipX').onclick = () => { flipX = !flipX; $('flipX').textContent = `左右反轉：${flipX ? '開' : '關'}`; };

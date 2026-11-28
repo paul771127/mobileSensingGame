@@ -6,7 +6,7 @@
 <title>島口大開 - 手機</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-  :root { --blue: #3aa0ff; --orange: #ff9f2e; }
+  :root { --blue: #3aa0ff; --orange: #ff9f2e; --purple: #b07cff; --green: #3fd37a; }
   html, body { overflow: hidden; height: 100%; touch-action: none; -webkit-user-select: none; user-select: none; }
   body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
   .screen { display: none; }
@@ -18,7 +18,7 @@
   #look { font-size: 30px; font-weight: 900; line-height: 1.15; }
   #look small { display: block; font-size: 14px; color: var(--muted); font-weight: 500; margin-top: 6px; }
   #badge { width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; font-size: 40px; font-weight: 900; color: #111; box-shadow: 0 12px 30px rgba(0,0,0,.4); flex: none; }
-  .side-A #badge { background: var(--blue); } .side-B #badge { background: var(--orange); }
+  .side-A #badge { background: var(--blue); } .side-B #badge { background: var(--orange); } .side-C #badge { background: var(--purple); } .side-D #badge { background: var(--green); }
   #gest { font-size: 22px; font-weight: 800; min-height: 30px; }
   #tilt { width: 120px; height: 120px; flex: none; border-radius: 50%; border: 2px solid #2a3560; position: relative; background: radial-gradient(circle, #1b2242 0 38%, transparent 40%); }
   #tilt i { position: absolute; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); left: 50%; top: 50%; transform: translate(-50%, -50%); transition: transform .05s linear; }
@@ -26,8 +26,8 @@
   #bottom .btn { padding: 10px 12px; font-size: 14px; }
   .taps { display: flex; gap: 10px; width: 100%; }
   .taps .btn { flex: 1; padding: 16px; font-size: 19px; }
-  #sideSel { display: flex; gap: 10px; }
-  #sideSel button { min-width: 120px; }
+  #sideSel { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #sideSel button { min-width: 72px; padding: 10px 12px; font-size: 15px; }
   #sideSel button.on { outline: 3px solid var(--accent); }
   .flash-jump { background: rgba(58,160,255,.22) !important; }
   .flash-hit { background: rgba(217,255,74,.22) !important; }
@@ -39,13 +39,16 @@
 
 <section id="join" class="screen on">
   <h1 style="margin:0">🏝 島口大開</h1>
-  <p class="muted">輸入電腦畫面上的房號，或掃 QR code</p>
+  <p class="muted">輸入電腦畫面上的房號，或掃 QR code（最多 4 人）</p>
   <input id="room" class="code" maxlength="4" placeholder="ABCD" autocomplete="off" autocapitalize="characters">
   <input id="name" class="code" style="font-size:18px;letter-spacing:0;width:220px" maxlength="12" placeholder="你的名字（選填）">
   <div id="sideSel">
-    <button class="btn secondary" data-side="A">🔵 藍修島員</button>
-    <button class="btn secondary" data-side="B">🟠 橘修島員</button>
+    <button class="btn secondary" data-side="A">🔵 藍</button>
+    <button class="btn secondary" data-side="B">🟠 橘</button>
+    <button class="btn secondary" data-side="C">🟣 紫</button>
+    <button class="btn secondary" data-side="D">🟢 綠</button>
   </div>
+  <p class="muted" style="font-size:12px;margin:0">不選的話自動分配空位</p>
   <button id="go" class="btn">加入並開啟感測器</button>
   <p id="joinMsg" class="muted" style="min-height:20px;font-size:14px"></p>
 </section>
@@ -59,7 +62,7 @@
   <p style="max-width:320px;margin:0">像拿遙控器一樣握著手機、<b>往前傾約 45°</b>（螢幕朝斜上方），<b>正對電腦螢幕</b>。這是預設的「站著不動」姿勢。</p>
   <p id="calibLive" class="muted" style="font-size:14px;min-height:20px">等待姿態感測器…</p>
   <button id="calibDone" class="btn" disabled>開始</button>
-  <p class="muted" style="font-size:13px;max-width:320px">之後：手機<b>前後左右傾斜</b>走位、手腕<b>短促上抬</b>跳躍、<b>向前短推</b>敲擊。<br>角度跑掉時：把手機<b>快速抬過 90° 再放回</b>，放回停住的角度就是新的不動姿勢。</p>
+  <p class="muted" style="font-size:13px;max-width:320px">之後：手機<b>前後左右傾斜</b>走位、手腕<b>短促上抬</b>跳躍，靠近敵人會自動敲。選技能時左右傾斜切換、回正停住確認。<br>角度跑掉時：把手機<b>快速抬過 90° 再放回</b>，放回停住的角度就是新的不動姿勢。</p>
 </section>
 
 <section id="play" class="screen">
@@ -70,17 +73,16 @@
   </div>
   <div id="main">
     <div id="badge">藍</div>
-    <div id="look">請看電腦螢幕<small>傾斜走位 · 上抬跳躍 · 前推敲擊<br>抬過 90° 再放回 = 重新校正</small></div>
+    <div id="look">請看電腦螢幕<small>傾斜走位 · 上抬跳躍 · 靠近自動敲<br>抬過 90° 再放回 = 重新校正</small></div>
     <div id="tilt"><i></i></div>
     <div id="gest"></div>
     <div id="sub" class="muted" style="font-size:14px;min-height:20px"></div>
     <div id="debug"></div>
   </div>
   <div id="bottom">
-    <button id="botBtn" class="btn secondary" style="display:none;width:100%">🤖 只有一個人？讓電腦當搭檔</button>
     <div class="taps">
       <button id="tapJump" class="btn secondary">⤒ 點一下跳</button>
-      <button id="tapHit" class="btn">🔨 點一下敲</button>
+      <button id="tapHit" class="btn">▶ 開始 / 敲一下</button>
     </div>
     <button id="calib" class="btn secondary">重新校正持握</button>
     <button id="sens" class="btn secondary">手勢靈敏度：中</button>

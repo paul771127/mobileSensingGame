@@ -1,17 +1,19 @@
-// 《島口大開》顯示端：固定斜俯視 3D 場地、所有提示與選擇都在這個畫面。
-// 模型從 /assets/island/*.glb 載入，缺檔時用程式建立同名節點的替代模型。
+// 《島口大開》顯示端：固定斜俯視 3D 場地，1～4 人合作闖關。所有提示、升級選單、結算都在這個畫面。
+// 模型從 /assets/island/*.glb 載入（見 docs/ISLAND_COOP_ART.md），缺檔時用程式建立同名節點的替代模型。
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { connect, qs } from '/common.js';
 
 const $ = (id) => document.getElementById(id);
-const COLORS = { A: 0x3aa0ff, B: 0xff9f2e };
-const CSS_COLORS = { A: '#3aa0ff', B: '#ff9f2e', accent: '#d9ff4a' };
-const LABEL = { A: '藍', B: '橘' };
+const SIDES = ['A', 'B', 'C', 'D'];
+const COLORS = { A: 0x3aa0ff, B: 0xff9f2e, C: 0xb07cff, D: 0x3fd37a };
+const CSS = { A: '#3aa0ff', B: '#ff9f2e', C: '#b07cff', D: '#3fd37a', accent: '#d9ff4a' };
+const LABEL = { A: '藍', B: '橘', C: '紫', D: '綠' };
+const PNUM = { A: 'P1', B: 'P2', C: 'P3', D: 'P4' };
 
 let roomCode = (qs('room') || '').toUpperCase();
 let joinedMsg = null;
-let state = null, stateAt = 0, prevState = null;
+let state = null, stateAt = 0;
 
 // ---------- 連線 ----------
 const ws = connect(onMessage, (api) => { api.send({ type: 'join', role: 'display', game: 'island', room: roomCode }); });
@@ -23,13 +25,11 @@ function onMessage(msg) {
     $('roomCode').textContent = roomCode;
     loadQr(); buildHostPicker();
   } else if (msg.type === 'state') {
-    prevState = state; state = msg.state; stateAt = performance.now();
+    state = msg.state; stateAt = performance.now();
     window.__islandState = state; // 給自動化測試讀取
     onState(state);
   }
 }
-
-// ---------- QR ----------
 let hostIdx = 0;
 function controllerUrl() {
   let host = qs('host') || location.hostname;
@@ -37,462 +37,302 @@ function controllerUrl() {
   const port = location.port ? `:${location.port}` : '';
   return `${location.protocol}//${host}${port}/island/controller?room=${roomCode}`;
 }
-function loadQr() {
-  const url = controllerUrl();
-  const src = `/qr?text=${encodeURIComponent(url)}`;
-  $('qrBig').src = src; $('qrSmall').src = src; $('qrUrl').textContent = url;
-}
+function loadQr() { const url = controllerUrl(); const src = `/qr?text=${encodeURIComponent(url)}`; $('qrBig').src = src; $('qrSmall').src = src; $('qrUrl').textContent = url; }
 function buildHostPicker() {
-  const box = $('hosts');
-  const hosts = joinedMsg?.hosts || [];
+  const box = $('hosts'); const hosts = joinedMsg?.hosts || [];
   const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   if (!local || hosts.length < 2) { box.style.display = 'none'; return; }
-  box.style.display = 'flex';
-  box.replaceChildren(document.createTextNode('QR code 用的 IP：'));
-  hosts.forEach((h, i) => {
-    const b = document.createElement('button');
-    b.textContent = h; b.className = i === hostIdx ? 'on' : '';
-    b.onclick = () => { hostIdx = i; loadQr(); buildHostPicker(); };
-    box.appendChild(b);
-  });
+  box.style.display = 'flex'; box.replaceChildren(document.createTextNode('QR code 用的 IP：'));
+  hosts.forEach((h, i) => { const b = document.createElement('button'); b.textContent = h; b.className = i === hostIdx ? 'on' : ''; b.onclick = () => { hostIdx = i; loadQr(); buildHostPicker(); }; box.appendChild(b); });
 }
 
 // ---------- Three.js 基礎 ----------
 const canvas = $('gl');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
-const BG = 0x5a7a92; // art-preview 的鋼藍底色
-scene.background = new THREE.Color(BG);
-scene.fog = new THREE.Fog(BG, 40, 75);
+const BG = 0x5a7a92;
+scene.background = new THREE.Color(BG); scene.fog = new THREE.Fog(BG, 40, 75);
 const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 200);
-const CAM_DIR = new THREE.Vector3(0.22, 0.86, 0.86).normalize(); // 約 45° 俯角、略偏右，保留「畫面上 = 巨怪方向」
-
+const CAM_DIR = new THREE.Vector3(0.22, 0.86, 0.86).normalize();
 scene.add(new THREE.HemisphereLight(0xe6f0f7, 0x3a5a4a, 1.1));
 const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
-sun.position.set(-10, 16, 9); sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.near = 1; sun.shadow.camera.far = 60;
-sun.shadow.camera.left = -18; sun.shadow.camera.right = 18; sun.shadow.camera.top = 16; sun.shadow.camera.bottom = -16;
-sun.shadow.bias = -0.0005;
+sun.position.set(-10, 16, 9); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 60; sun.shadow.camera.left = -18; sun.shadow.camera.right = 18; sun.shadow.camera.top = 16; sun.shadow.camera.bottom = -16; sun.shadow.bias = -0.0005;
 scene.add(sun); scene.add(sun.target);
 const fill = new THREE.DirectionalLight(0xbfd8ee, 0.4); fill.position.set(10, 6, -8); scene.add(fill);
-
-// 海面（與背景同色系，只為承接陰影）
-const sea = new THREE.Mesh(new THREE.PlaneGeometry(200, 200, 1, 1), new THREE.MeshStandardMaterial({ color: 0x54748c, roughness: 0.9, metalness: 0 }));
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x54748c, roughness: 0.9 }));
 sea.rotation.x = -Math.PI / 2; sea.position.y = -2.2; sea.receiveShadow = true; scene.add(sea);
-// 水面的深色石頭（art-preview 的點綴）
 const ROCK_MAT = new THREE.MeshStandardMaterial({ color: 0x0b2238, roughness: 0.95, flatShading: true });
-for (const [x, z, r] of [[-10, -5, 0.9], [-10.5, 4, 0.6], [14.5, 4.5, 0.8], [13.5, -6, 0.55], [5, 9, 0.6], [-5, 8.5, 0.45], [16, -1, 0.5]]) {
+for (const [x, z, r] of [[-11, -5, 0.9], [-11.5, 4, 0.6], [11.5, 5.5, 0.8], [12, -5, 0.55], [4, 9.5, 0.6], [-5, 9, 0.45], [13, 0, 0.5]]) {
   const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), ROCK_MAT); rock.position.set(x, -2.2 + r * 0.25, z); rock.scale.y = 0.65; rock.rotation.set(0.3, x * 0.7, 0); rock.castShadow = rock.receiveShadow = true; scene.add(rock);
 }
-
-// 固定斜俯視：把整座島（含巨怪與鐘樓）收進畫面
 let worldBounds = null;
 function fitCamera() {
   if (!worldBounds) return;
   const b = worldBounds;
-  const center = new THREE.Vector3((b.minX + b.maxX) / 2, 0.8, (b.minZ + b.maxZ) / 2 + 0.6);
-  const corners = [];
-  for (const x of [b.minX, b.maxX]) for (const y of [-0.5, 5.5]) for (const z of [b.minZ, b.maxZ]) corners.push(new THREE.Vector3(x, y, z));
+  const center = new THREE.Vector3((b.minX + b.maxX) / 2, 0.6, (b.minZ + b.maxZ) / 2 + 0.4);
+  const corners = []; for (const x of [b.minX, b.maxX]) for (const y of [-0.5, 3.2]) for (const z of [b.minZ, b.maxZ]) corners.push(new THREE.Vector3(x, y, z));
   let lo = 8, hi = 80;
   for (let i = 0; i < 24; i++) {
-    const d = (lo + hi) / 2;
-    camera.position.copy(center).addScaledVector(CAM_DIR, d);
-    camera.lookAt(center); camera.updateMatrixWorld(); camera.updateProjectionMatrix();
-    let ok = true;
-    for (const c of corners) { const p = c.clone().project(camera); if (Math.abs(p.x) > 0.93 || Math.abs(p.y) > 0.84) { ok = false; break; } }
+    const d = (lo + hi) / 2; camera.position.copy(center).addScaledVector(CAM_DIR, d); camera.lookAt(center); camera.updateMatrixWorld(); camera.updateProjectionMatrix();
+    let ok = true; for (const c of corners) { const p = c.clone().project(camera); if (Math.abs(p.x) > 0.96 || Math.abs(p.y) > 0.84) { ok = false; break; } }
     if (ok) hi = d; else lo = d;
   }
-  camera.position.copy(center).addScaledVector(CAM_DIR, hi);
-  camera.lookAt(center);
-  sun.target.position.copy(center);
+  camera.position.copy(center).addScaledVector(CAM_DIR, hi); camera.lookAt(center); sun.target.position.copy(center);
 }
-function resize() {
-  const w = innerWidth, h = innerHeight;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h; camera.updateProjectionMatrix();
-  fitCamera();
-}
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); fitCamera(); }
 addEventListener('resize', resize);
 
-// ---------- 模型（GLB 或程式替代） ----------
+// ---------- 模型 ----------
 const loader = new GLTFLoader();
-const models = {}; // name -> Object3D 範本
+const models = {};
 async function loadGlb(name) {
-  try {
-    const gltf = await loader.loadAsync(`/assets/island/${name}.glb`);
-    const obj = gltf.scene;
-    obj.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    return obj;
-  } catch { return null; }
+  try { const gltf = await loader.loadAsync(`/assets/island/${name}.glb`); gltf.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } }); return gltf.scene; } catch { return null; }
 }
 const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05, ...extra });
 function box(w, h, d, m, x = 0, y = 0, z = 0) { const g = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); g.position.set(x, y, z); g.castShadow = g.receiveShadow = true; return g; }
-function sphere(r, m, x = 0, y = 0, z = 0, seg = 18) { const g = new THREE.Mesh(new THREE.SphereGeometry(r, seg, seg), m); g.position.set(x, y, z); g.castShadow = true; return g; }
+function sphere(r, m, x = 0, y = 0, z = 0, seg = 16) { const g = new THREE.Mesh(new THREE.SphereGeometry(r, seg, seg), m); g.position.set(x, y, z); g.castShadow = true; return g; }
 function cyl(rt, rb, h, m, x = 0, y = 0, z = 0, seg = 16) { const g = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), m); g.position.set(x, y, z); g.castShadow = g.receiveShadow = true; return g; }
-
-function fallbackTile(spring) {
-  const g = new THREE.Group();
-  const top = spring ? mat(0xf2c230, { roughness: 0.4, metalness: 0.3 }) : mat(0x6fbf5a);
-  const side = spring ? mat(0xb8841a) : mat(0x8a5a3c);
-  const m = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.5, 1.44), [side, side, top, mat(0x5a3a26), side, side]);
-  m.position.y = -0.25; m.castShadow = m.receiveShadow = true; g.add(m);
-  if (spring) {
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.06, 10, 28), mat(0x6b4a12)); ring.rotation.x = Math.PI / 2; ring.position.y = 0.03; g.add(ring);
-    const knob = cyl(0.14, 0.14, 0.1, mat(0xfff0a8, { emissive: 0x665500 }), 0, 0.05, 0); g.add(knob);
-  }
+function fallbackTile() { const g = new THREE.Group(); const m = new THREE.Mesh(new THREE.BoxGeometry(1.44, 0.5, 1.44), [mat(0x0a4a52), mat(0x0a4a52), mat(0x6fbf5a), mat(0x05283a), mat(0x0a4a52), mat(0x0a4a52)]); m.position.y = -0.25; m.castShadow = m.receiveShadow = true; g.add(m); return g; }
+function fallbackRepairer(color) {
+  const g = new THREE.Group(); const team = mat(color), skin = mat(0xf3d2b3), dark = mat(0x2b2f45);
+  g.add(box(0.44, 0.36, 0.3, team, 0, 0.49, 0)); g.add(sphere(0.24, skin, 0, 0.86, 0)); g.add(box(0.4, 0.14, 0.1, dark, 0, 0.84, 0.23));
+  for (const [name, x] of [['Arm_L', -0.26], ['Arm_R', 0.26]]) { const a = new THREE.Group(); a.name = name; a.position.set(x, 0.6, 0); a.add(box(0.14, 0.3, 0.14, team, 0, -0.15, 0)); if (name === 'Arm_R') a.add(box(0.22, 0.15, 0.15, mat(0xf2c230), 0, -0.24, 0.33)); g.add(a); }
+  for (const [name, x] of [['Leg_L', -0.13], ['Leg_R', 0.13]]) { const l = new THREE.Group(); l.name = name; l.position.set(x, 0.38, 0); l.add(box(0.15, 0.38, 0.15, dark, 0, -0.19, 0)); g.add(l); }
   return g;
 }
-function fallbackRepairer(color) {
+function fallbackMob(kind) {
   const g = new THREE.Group();
-  const team = mat(color), skin = mat(0xf3d2b3), dark = mat(0x2b2f45), wood = mat(0x9a6b3a), iron = mat(0x9aa3b5, { metalness: 0.6, roughness: 0.3 });
-  g.add(box(0.5, 0.6, 0.3, team, 0, 0.85, 0));
-  g.add(sphere(0.23, skin, 0, 1.4, 0));
-  const hat = cyl(0.28, 0.3, 0.14, team, 0, 1.6, 0); g.add(hat);
-  const eyeL = sphere(0.035, dark, -0.08, 1.42, 0.2, 8), eyeR = sphere(0.035, dark, 0.08, 1.42, 0.2, 8); g.add(eyeL, eyeR);
-  const armL = new THREE.Group(); armL.name = 'Arm_L'; armL.position.set(-0.33, 1.1, 0); armL.add(box(0.14, 0.5, 0.14, team, 0, -0.25, 0)); g.add(armL);
-  const armR = new THREE.Group(); armR.name = 'Arm_R'; armR.position.set(0.33, 1.1, 0); armR.add(box(0.14, 0.5, 0.14, team, 0, -0.25, 0));
-  const handle = cyl(0.03, 0.03, 0.75, wood, 0, -0.5, 0.32); handle.rotation.x = Math.PI / 2; armR.add(handle);
-  armR.add(box(0.22, 0.15, 0.15, iron, 0, -0.5, 0.66));
-  g.add(armR);
-  for (const [name, x] of [['Leg_L', -0.13], ['Leg_R', 0.13]]) { const leg = new THREE.Group(); leg.name = name; leg.position.set(x, 0.55, 0); leg.add(box(0.16, 0.55, 0.16, dark, 0, -0.275, 0)); g.add(leg); }
+  if (kind === 'grunt') { g.add(box(0.8, 0.5, 0.6, mat(0x8a2a2a), 0, 0.35, 0)); const h = new THREE.Group(); h.name = 'Head'; h.position.set(0, 0.5, 0.2); h.add(box(0.44, 0.1, 0.05, mat(0x111111), 0, 0.03, 0.28)); g.add(h); for (const [n, x] of [['Claw_L', -0.38], ['Claw_R', 0.38]]) { const c = new THREE.Group(); c.name = n; c.position.set(x, 0.36, 0.17); c.add(box(0.2, 0.2, 0.38, mat(0xff3020), 0, 0, 0.14)); g.add(c); } }
+  else if (kind === 'ranged') { const hb = new THREE.Group(); hb.name = 'HoverBody'; hb.position.set(0, 0.64, 0); hb.add(new THREE.Mesh(new THREE.OctahedronGeometry(0.42), mat(0x4a2a8a))); const sock = new THREE.Group(); sock.name = 'ProjectileSocket'; sock.position.set(0, -0.02, 0.48); hb.add(sock); hb.add(sphere(0.1, new THREE.MeshStandardMaterial({ color: 0x8ad6ff, emissive: 0x2a8ab0 }), 0, 0, 0.42)); g.add(hb); }
+  else { g.add(box(1.5, 0.5, 1.4, mat(0x2a1830), 0, 0.5, 0)); g.add(box(1.3, 0.35, 1.0, mat(0x6a1a1a), 0, 0.95, -0.1)); const rg = new THREE.Group(); rg.name = 'RamGuard'; rg.position.set(0, 0.54, 0.53); rg.add(box(1.4, 0.5, 0.3, mat(0xff8a2a), 0, 0, 0.3)); const cl = sphere(0.12, new THREE.MeshStandardMaterial({ color: 0xff3020, emissive: 0xff2010 }), 0, 0.08, 0.5); cl.name = 'ChargeLight'; rg.add(cl); g.add(rg); }
   return g;
 }
 function fallbackBoss() {
-  const root = new THREE.Group(); root.name = 'Boss';
-  const purple = mat(0x7a4ac8), darker = mat(0x4b2a86), tooth = mat(0xfff6e0), eyeW = mat(0xffffff), pupil = mat(0x111111);
-  const body = sphere(1.5, purple, 0, 1.4, -0.2, 24); body.scale.set(1.1, 0.95, 1.05); root.add(body);
-  for (let i = 0; i < 4; i++) { const sp = cyl(0, 0.18, 0.7, darker, -0.9 + i * 0.6, 2.6, -0.6 - Math.abs(i - 1.5) * 0.3, 6); root.add(sp); }
-  for (const x of [-0.62, 0.62]) { root.add(sphere(0.28, eyeW, x, 2.15, 0.95, 14)); root.add(sphere(0.13, pupil, x, 2.17, 1.2, 10)); }
-  const upper = new THREE.Group(); upper.name = 'UpperJaw'; upper.position.set(0, 1.35, 0.5);
-  upper.add(box(2.3, 0.6, 1.7, purple, 0, 0.3, 0.75));
-  for (let i = 0; i < 5; i++) { const t = cyl(0, 0.1, 0.32, tooth, -0.8 + i * 0.4, -0.12, 1.5, 6); t.rotation.x = Math.PI; upper.add(t); }
-  root.add(upper);
-  const jaw = new THREE.Group(); jaw.name = 'Jaw'; jaw.position.set(0, 0.75, 0.5);
-  jaw.add(box(2.3, 0.5, 1.7, darker, 0, -0.25, 0.75));
-  for (let i = 0; i < 4; i++) jaw.add(cyl(0, 0.1, 0.3, tooth, -0.6 + i * 0.4, 0.12, 1.5, 6));
-  root.add(jaw);
-  const socket = new THREE.Group(); socket.name = 'BrickSocket'; socket.position.set(0, 1.0, 1.3); root.add(socket);
-  const core = sphere(0.36, new THREE.MeshStandardMaterial({ color: 0xff3fd0, emissive: 0xff2fb0, emissiveIntensity: 1.2, roughness: 0.3 }), 0, 1.1, 1.6, 20); core.name = 'Core'; root.add(core);
+  const root = new THREE.Group(); root.name = 'Boss'; const purple = mat(0x0a4a58), tooth = mat(0xfff6e0);
+  root.add(box(2.6, 2.2, 2.0, purple, 0, 1.3, -0.3));
+  const upper = new THREE.Group(); upper.name = 'UpperJaw'; upper.position.set(0, 1.42, 0.18); upper.add(box(2.5, 0.7, 1.0, purple, 0, 0.3, 0.6)); for (let i = 0; i < 4; i++) upper.add(cyl(0.08, 0, 0.3, tooth, -0.75 + i * 0.5, -0.1, 1.0, 6)); root.add(upper);
+  const jaw = new THREE.Group(); jaw.name = 'Jaw'; jaw.position.set(0, 0.54, 0.17); jaw.add(box(2.3, 0.4, 1.1, mat(0x073a46), 0, -0.1, 0.6)); root.add(jaw);
+  const sock = new THREE.Group(); sock.name = 'BrickSocket'; sock.position.set(0, 0.95, 1.05); root.add(sock);
+  const core = sphere(0.36, new THREE.MeshStandardMaterial({ color: 0xff3fd0, emissive: 0xff2fb0, emissiveIntensity: 1.2 }), 0, 1.0, 0.77); core.name = 'Core'; root.add(core);
   return root;
 }
-function fallbackTower() {
-  const g = new THREE.Group();
-  const stone = mat(0x8e94a8), wood = mat(0x7a5533), roof = mat(0xb5443a), gold = mat(0xf2c230, { metalness: 0.5, roughness: 0.3 });
-  g.add(cyl(0.95, 1.1, 3.2, stone, 0, 1.6, 0, 20));
-  g.add(cyl(1.4, 1.4, 0.2, wood, 0, 3.1, 0, 24));
-  for (const x of [-0.85, 0.85]) for (const z of [-0.85, 0.85]) g.add(cyl(0.08, 0.08, 1.7, wood, x, 4.05, z, 8));
-  g.add(cyl(0, 1.45, 0.9, roof, 0, 5.35, 0, 8));
-  const pivot = new THREE.Group(); pivot.name = 'BellPivot'; pivot.position.set(0, 4.85, 0);
-  pivot.add(cyl(0.16, 0.42, 0.65, gold, 0, -0.38, 0, 16));
-  pivot.add(sphere(0.08, gold, 0, -0.74, 0, 8));
-  g.add(pivot);
-  return g;
-}
+function fallbackGate() { const g = new THREE.Group(); const t = mat(0x0a4a58); g.add(box(0.4, 1.7, 0.4, t, -0.77, 0.85, 0)); g.add(box(0.4, 1.7, 0.4, t, 0.77, 0.85, 0)); g.add(box(2.1, 0.25, 0.5, mat(0x05283a), 0, 1.76, 0)); const c = new THREE.Group(); c.name = 'GateCenter'; c.position.set(0, 0.8, 0); g.add(c); return g; }
+function fallbackShrine() { const g = new THREE.Group(); g.add(cyl(0.5, 0.6, 0.3, mat(0x05283a), 0, 0.15, 0)); const p = new THREE.Group(); p.name = 'CrystalPivot'; p.position.set(0, 0.72, 0); p.add(new THREE.Mesh(new THREE.OctahedronGeometry(0.28), new THREE.MeshStandardMaterial({ color: 0x8ad6ff, emissive: 0x2a8ab0 }))); g.add(p); return g; }
 async function loadModels() {
-  const [tile, spring, blue, orange, boss, tower] = await Promise.all(['ground-tile', 'spring-tile', 'repairer-blue', 'repairer-orange', 'chomp-boss', 'bell-tower'].map(loadGlb));
-  models.tile = tile || fallbackTile(false);
-  models.spring = spring || fallbackTile(true);
-  models.A = blue || fallbackRepairer(COLORS.A);
-  models.B = orange || fallbackRepairer(COLORS.B);
-  models.boss = boss || fallbackBoss();
-  models.tower = tower || fallbackTower();
-  models.usingGlb = { tile: !!tile, spring: !!spring, A: !!blue, B: !!orange, boss: !!boss, tower: !!tower };
+  const names = { tile: 'ground-tile', A: 'repairer-blue', B: 'repairer-orange', C: 'repairer-purple', D: 'repairer-green', boss: 'chomp-boss', grunt: 'mob-melee', ranged: 'mob-ranged', elite: 'mob-charger', orb: 'enemy-orb', gate: 'stage-gate', shrine: 'upgrade-shrine' };
+  const loaded = await Promise.all(Object.values(names).map(loadGlb));
+  models.usingGlb = {};
+  Object.keys(names).forEach((k, i) => { models[k] = loaded[i]; models.usingGlb[k] = !!loaded[i]; });
+  models.tile ||= fallbackTile();
+  for (const s of SIDES) models[s] ||= fallbackRepairer(COLORS[s]);
+  models.boss ||= fallbackBoss(); models.grunt ||= fallbackMob('grunt'); models.ranged ||= fallbackMob('ranged'); models.elite ||= fallbackMob('elite');
+  models.orb ||= (() => { const g = new THREE.Group(); g.add(sphere(0.14, new THREE.MeshStandardMaterial({ color: 0x8ad6ff, emissive: 0x2a8ab0, emissiveIntensity: 1.2 }))); return g; })();
+  models.gate ||= fallbackGate(); models.shrine ||= fallbackShrine();
 }
 
-// ---------- 程式畫的標記貼圖 ----------
-function canvasTex(size, draw) {
-  const c = document.createElement('canvas'); c.width = c.height = size;
-  const ctx = c.getContext('2d'); draw(ctx, size);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
-}
-// 咬痕：上下兩排牙齒的弧線
+// ---------- 程式畫的貼圖 / 文字 ----------
+function canvasTex(size, draw) { const c = document.createElement('canvas'); c.width = c.height = size; const ctx = c.getContext('2d'); draw(ctx, size); const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t; }
 const biteTex = canvasTex(256, (ctx, s) => {
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 10; ctx.lineCap = 'round'; ctx.fillStyle = '#fff';
-  for (const dir of [1, -1]) {
-    ctx.beginPath(); ctx.arc(s / 2, s / 2, s * 0.36, dir > 0 ? Math.PI * 1.15 : Math.PI * 0.15, dir > 0 ? Math.PI * 1.85 : Math.PI * 0.85); ctx.stroke();
-    for (let i = 0; i < 6; i++) {
-      const a = (dir > 0 ? Math.PI * 1.22 : Math.PI * 0.22) + i * Math.PI * 0.11;
-      const x = s / 2 + Math.cos(a) * s * 0.36, y = s / 2 + Math.sin(a) * s * 0.36;
-      ctx.beginPath(); ctx.moveTo(x - 12, y); ctx.lineTo(x + 12, y); ctx.lineTo(x, y - dir * 30); ctx.closePath(); ctx.fill();
-    }
-  }
+  for (const dir of [1, -1]) { ctx.beginPath(); ctx.arc(s / 2, s / 2, s * 0.36, dir > 0 ? Math.PI * 1.15 : Math.PI * 0.15, dir > 0 ? Math.PI * 1.85 : Math.PI * 0.85); ctx.stroke(); for (let i = 0; i < 6; i++) { const a = (dir > 0 ? Math.PI * 1.22 : Math.PI * 0.22) + i * Math.PI * 0.11; const x = s / 2 + Math.cos(a) * s * 0.36, y = s / 2 + Math.sin(a) * s * 0.36; ctx.beginPath(); ctx.moveTo(x - 12, y); ctx.lineTo(x + 12, y); ctx.lineTo(x, y - dir * 30); ctx.closePath(); ctx.fill(); } }
 });
-// 落點：方框四角 + 中心點
-const targetTex = canvasTex(256, (ctx, s) => {
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 14; ctx.lineCap = 'round';
-  const m = 28, L = 60;
-  for (const [x, y, dx, dy] of [[m, m, 1, 1], [s - m, m, -1, 1], [m, s - m, 1, -1], [s - m, s - m, -1, -1]]) {
-    ctx.beginPath(); ctx.moveTo(x, y + dy * L); ctx.lineTo(x, y); ctx.lineTo(x + dx * L, y); ctx.stroke();
-  }
-  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s / 2, s / 2, 16, 0, Math.PI * 2); ctx.fill();
-});
-// 弱點：六角環 + 尖刺
-const weakTex = canvasTex(256, (ctx, s) => {
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 12; ctx.lineJoin = 'round';
-  ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; const x = s / 2 + Math.cos(a) * 88, y = s / 2 + Math.sin(a) * 88; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.closePath(); ctx.stroke();
-  ctx.lineWidth = 10; for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + Math.PI / 6; ctx.beginPath(); ctx.moveTo(s / 2 + Math.cos(a) * 96, s / 2 + Math.sin(a) * 96); ctx.lineTo(s / 2 + Math.cos(a) * 120, s / 2 + Math.sin(a) * 120); ctx.stroke(); }
-});
-// 斷橋目標格：虛線方框
-const dashTex = canvasTex(256, (ctx, s) => {
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 10; ctx.setLineDash([26, 18]); ctx.strokeRect(18, 18, s - 36, s - 36);
-});
-// 能力區：圓盤 + 圖示
-function padTex(kind) {
-  return canvasTex(256, (ctx, s) => {
-    ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.arc(s / 2, s / 2, 110, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 10; ctx.beginPath(); ctx.arc(s / 2, s / 2, 110, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 16; ctx.lineCap = 'round';
-    if (kind === 'boots') { // 靴子
-      ctx.beginPath(); ctx.moveTo(95, 70); ctx.lineTo(135, 70); ctx.lineTo(135, 150); ctx.lineTo(185, 165); ctx.lineTo(185, 190); ctx.lineTo(95, 190); ctx.closePath(); ctx.fill();
-    } else { // 槌子
-      ctx.beginPath(); ctx.moveTo(128, 200); ctx.lineTo(128, 110); ctx.stroke();
-      ctx.fillRect(70, 60, 116, 56);
-    }
-  });
-}
+const ringTex = canvasTex(256, (ctx, s) => { ctx.strokeStyle = '#fff'; ctx.lineWidth = 14; ctx.beginPath(); ctx.arc(s / 2, s / 2, 100, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([14, 14]); ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(s / 2, s / 2, 70, 0, Math.PI * 2); ctx.stroke(); });
+const weakTex = canvasTex(256, (ctx, s) => { ctx.strokeStyle = '#fff'; ctx.lineWidth = 12; ctx.lineJoin = 'round'; ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; const x = s / 2 + Math.cos(a) * 88, y = s / 2 + Math.sin(a) * 88; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.closePath(); ctx.stroke(); ctx.lineWidth = 10; for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + Math.PI / 6; ctx.beginPath(); ctx.moveTo(s / 2 + Math.cos(a) * 96, s / 2 + Math.sin(a) * 96); ctx.lineTo(s / 2 + Math.cos(a) * 120, s / 2 + Math.sin(a) * 120); ctx.stroke(); } });
+const arrowTex = canvasTex(256, (ctx, s) => { ctx.fillStyle = '#fff'; for (let i = 0; i < 4; i++) { const y = 40 + i * 56; ctx.beginPath(); ctx.moveTo(s / 2 - 50, y + 30); ctx.lineTo(s / 2, y); ctx.lineTo(s / 2 + 50, y + 30); ctx.lineTo(s / 2 + 50, y + 46); ctx.lineTo(s / 2, y + 16); ctx.lineTo(s / 2 - 50, y + 46); ctx.closePath(); ctx.fill(); } });
 function textSprite(text, color = '#fff', bg = 'rgba(10,16,38,.75)', scale = 1) {
-  const c = document.createElement('canvas');
-  const ctx = c.getContext('2d');
-  const font = 'bold 64px system-ui, "Noto Sans TC", sans-serif';
-  ctx.font = font;
-  const w = Math.ceil(ctx.measureText(text).width) + 56;
-  c.width = Math.max(96, Math.min(2048, w)); c.height = 128;
-  ctx.font = font;
-  ctx.fillStyle = bg; roundRect(ctx, 4, 14, c.width - 8, 100, 28); ctx.fill();
-  ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, c.width / 2, 66);
+  const c = document.createElement('canvas'); const ctx = c.getContext('2d'); const font = 'bold 64px system-ui, "Noto Sans TC", sans-serif';
+  ctx.font = font; const w = Math.ceil(ctx.measureText(text).width) + 56; c.width = Math.max(96, Math.min(2048, w)); c.height = 128; ctx.font = font;
+  ctx.fillStyle = bg; roundRect(ctx, 4, 14, c.width - 8, 100, 28); ctx.fill(); ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(text, c.width / 2, 66);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
-  sp.scale.set(c.width * 0.00625 * scale, 0.8 * scale, 1); sp.renderOrder = 10;
-  return sp;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true })); sp.scale.set(c.width * 0.00625 * scale, 0.8 * scale, 1); sp.renderOrder = 10; return sp;
 }
 function roundRect(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
-function decal(tex, color, size = 1.4, opacity = 1) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: tex, color, transparent: true, opacity, depthWrite: false }));
-  m.rotation.x = -Math.PI / 2; m.renderOrder = 5; return m;
+function decal(tex, color, size = 1.4, opacity = 1) { const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ map: tex, color, transparent: true, opacity, depthWrite: false })); m.rotation.x = -Math.PI / 2; m.renderOrder = 5; return m; }
+// 小血條：兩個 Sprite（底 + 前景，左對齊）
+function hpBar(width = 0.9) {
+  const g = new THREE.Group();
+  const bg = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0x0a1020, depthTest: false, transparent: true, opacity: 0.8 })); bg.scale.set(width, 0.12, 1); bg.renderOrder = 9;
+  const fg = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xff4f7a, depthTest: false })); fg.center.set(0, 0.5); fg.position.x = -width / 2; fg.scale.set(width, 0.09, 1); fg.renderOrder = 10;
+  g.add(bg, fg); g.userData = { fg, width }; return g;
 }
 
 // ---------- 場景物件 ----------
 const world = new THREE.Group(); scene.add(world);
-const tileMeshes = new Map(), platMeshes = new Map(), ghostMeshes = new Map();
-const tilesGroup = new THREE.Group(), platsGroup = new THREE.Group(), markGroup = new THREE.Group(), ghostGroup = new THREE.Group();
-world.add(tilesGroup, platsGroup, markGroup, ghostGroup);
-let bossObj = null, bossParts = {}, towerObj = null, bellPivot = null, heldBrick = null, flightBrick = null;
+const tilesGroup = new THREE.Group(), markGroup = new THREE.Group(), enemyGroup = new THREE.Group(); world.add(tilesGroup, markGroup, enemyGroup);
+const tileMeshes = new Map(), ghostMeshes = new Map(), enemyViews = new Map(), spawnDecals = [], projMeshes = [];
 const playerViews = {};
-let bridgeDecals = [], padDecals = [], lockDecal, goalViews = {}, candDecals = [], landDecal, landArrow, landLabel, weakSprite, weakLabel, previewLine, flightLine, bridgeLabel;
-let gridInfo = null;
+let bossObj = null, bossParts = {}, gateObj = null, gateGlow = null, shrineObj = null, shrineRing = null, crystal = null;
+let lockDecals = [], candDecals = [], weakSprite, weakLabel, coreBeacon, coreLabel, gridInfo = null;
 const cellX = (c) => (c - gridInfo.cx) * gridInfo.s, cellZ = (r) => (r - gridInfo.cz) * gridInfo.s;
 
 function buildStatic(s) {
   gridInfo = s.grid;
-  // 鐘樓：bell-tower.glb 是落地涼亭（高 1.92、底座頂 0.2），放在石柱平台上，底座頂面對齊可站高度 s.tower.top
-  towerObj = new THREE.Group(); towerObj.position.set(s.tower.x, 0, s.tower.z); world.add(towerObj);
-  if (models.usingGlb.tower) {
-    const GAZ_SCALE = 1.2, PLINTH_TOP = 0.2 * GAZ_SCALE;
-    const stone = mat(0x113a4c, { flatShading: true }), teal = mat(0x0a5663);
-    const pillar = cyl(0.95, 1.25, s.tower.top + 2.2, stone, 0, (s.tower.top - 2.2) / 2 - 0.3, 0, 10); pillar.receiveShadow = true; towerObj.add(pillar);
-    const disc = cyl(s.tower.radius, s.tower.radius + 0.1, 0.36, teal, 0, s.tower.top - 0.18, 0, 28); towerObj.add(disc);
-    const gaz = models.tower.clone(); gaz.scale.setScalar(GAZ_SCALE); gaz.position.y = s.tower.top - PLINTH_TOP; towerObj.add(gaz);
-  } else towerObj.add(models.tower.clone());
-  bellPivot = towerObj.getObjectByName('BellPivot');
-  // 巨怪
-  bossObj = models.boss.clone(); world.add(bossObj);
-  bossParts = { upper: bossObj.getObjectByName('UpperJaw'), jaw: bossObj.getObjectByName('Jaw'), socket: bossObj.getObjectByName('BrickSocket'), core: bossObj.getObjectByName('Core') };
+  // 關卡門（北邊）
+  gateObj = models.gate.clone(); gateObj.scale.setScalar(1.3); gateObj.position.set(s.gate.x, 0, s.gate.z); world.add(gateObj);
+  gateGlow = new THREE.Mesh(new THREE.PlaneGeometry(1.5 * 1.3, 1.55 * 1.3), new THREE.MeshBasicMaterial({ color: 0x8af5ff, transparent: true, opacity: 0.0, side: THREE.DoubleSide, depthWrite: false }));
+  gateObj.updateMatrixWorld(true);
+  const gc = gateObj.getObjectByName('GateCenter'); const gp = gc ? gc.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(s.gate.x, 1.0, s.gate.z);
+  gateGlow.position.copy(gp); world.add(gateGlow);
+  // 升級台（中央，升級時出現）
+  shrineObj = models.shrine.clone(); shrineObj.scale.setScalar(1.3); shrineObj.position.set(s.shrine.x, 0, s.shrine.z); shrineObj.visible = false; world.add(shrineObj);
+  crystal = shrineObj.getObjectByName('CrystalPivot');
+  shrineRing = decal(ringTex, 0x8af5ff, 3, 0.8); shrineRing.position.set(s.shrine.x, 0.04, s.shrine.z); shrineRing.visible = false; markGroup.add(shrineRing);
+  // Boss
+  bossObj = models.boss.clone(); bossObj.visible = false; world.add(bossObj);
+  bossParts = { upper: bossObj.getObjectByName('UpperJaw'), jaw: bossObj.getObjectByName('Jaw'), core: bossObj.getObjectByName('Core') };
   if (bossParts.core) { bossParts.core.visible = false; if (bossParts.core.material) { bossParts.core.material = bossParts.core.material.clone(); bossParts.core.material.emissive = new THREE.Color(0xff2a3a); bossParts.core.material.emissiveIntensity = 1.2; } }
   bossObj.traverse((o) => { if (o.isMesh && o.material?.name === 'gold_glow') { o.material = o.material.clone(); o.material.emissiveIntensity = 1.5; } });
-  // 斷橋目標格
-  for (const [c, r] of s.bridge) { const d = decal(dashTex, 0x35d0e0, 1.44, 0.75); d.position.set(cellX(c), 0.02, cellZ(r)); markGroup.add(d); bridgeDecals.push(d); }
-  const mid = s.bridge[Math.floor(s.bridge.length / 2)];
-  bridgeLabel = textSprite('斷橋：彈簧磚落點', '#35d0e0'); bridgeLabel.position.set(cellX(mid[0]) + 0.75, 1.6, cellZ(mid[1]) + 0.2); markGroup.add(bridgeLabel);
-  // 能力區（等鐘響後顯示）
-  for (const pd of [{ kind: 'boots' }, { kind: 'hammer' }]) {
-    const d = decal(padTex(pd.kind), pd.kind === 'boots' ? 0xd9a066 : 0x35d0e0, 1.3, 0.95); d.visible = false; markGroup.add(d);
-    const label = textSprite(pd.kind === 'boots' ? '黏土靴：落地固定相鄰平台' : '回音槌：敲擊距離變長', pd.kind === 'boots' ? '#ffd9b0' : '#9ff2ff'); label.visible = false; markGroup.add(label);
-    padDecals.push({ kind: pd.kind, d, label });
-  }
-  // 標記
-  lockDecal = decal(biteTex, 0xff3b3b, 1.6, 0.95); lockDecal.visible = false; markGroup.add(lockDecal);
-  for (let i = 0; i < 9; i++) { const d = decal(biteTex, 0x0b2238, 1.3, 0.55); d.visible = false; markGroup.add(d); candDecals.push(d); }
-  landDecal = decal(targetTex, 0xffe14d, 1.5, 1); landDecal.visible = false; markGroup.add(landDecal);
-  landArrow = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 6), new THREE.MeshBasicMaterial({ color: 0xffe14d })); landArrow.rotation.x = Math.PI; landArrow.visible = false; markGroup.add(landArrow);
-  landLabel = textSprite('落點', '#ffe14d'); landLabel.visible = false; markGroup.add(landLabel);
+  for (let i = 0; i < 9; i++) { const d = decal(biteTex, 0x0b2238, 1.3, 0.55); d.visible = false; markGroup.add(d); candDecals.push(d); const l = decal(biteTex, 0xff3b3b, 1.5, 0.95); l.visible = false; markGroup.add(l); lockDecals.push(l); }
   weakSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: weakTex, color: 0xff3fd0, transparent: true, depthTest: false })); weakSprite.scale.set(2.2, 2.2, 1); weakSprite.visible = false; weakSprite.renderOrder = 9; markGroup.add(weakSprite);
-  weakLabel = textSprite('弱點：打核心！', '#ff9fe8'); weakLabel.visible = false; markGroup.add(weakLabel);
-  previewLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(new Array(25).fill(0).map(() => new THREE.Vector3())), new THREE.LineDashedMaterial({ color: 0xffe14d, dashSize: 0.35, gapSize: 0.2, transparent: true, opacity: 0.9 }));
-  previewLine.visible = false; previewLine.renderOrder = 8; markGroup.add(previewLine);
-  flightLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(new Array(25).fill(0).map(() => new THREE.Vector3())), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 }));
-  flightLine.visible = false; markGroup.add(flightLine);
+  weakLabel = textSprite('核心露出：上前打！', '#ff9fe8'); weakLabel.visible = false; markGroup.add(weakLabel);
+  coreBeacon = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 5, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xff9fe8, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false })); coreBeacon.visible = false; markGroup.add(coreBeacon);
+  coreLabel = textSprite('站這裡打核心', '#fff', 'rgba(255,63,208,.85)', 0.8); coreLabel.visible = false; markGroup.add(coreLabel);
   // 玩家
-  for (const side of ['A', 'B']) {
-    const root = new THREE.Group();
-    const model = models[side].clone();
-    if (models.usingGlb[side]) model.scale.setScalar(1.25); // repairer 高 1.1，放大一點在大螢幕上好辨認（仍小於一格地磚）
-    root.add(model);
-    const h = new THREE.Box3().setFromObject(model).max.y; // 模型頂（頭盔）
+  for (const side of SIDES) {
+    const root = new THREE.Group(); const tilt = new THREE.Group(); root.add(tilt);
+    const model = models[side].clone(); if (models.usingGlb[side]) model.scale.setScalar(1.25); tilt.add(model);
+    const h = new THREE.Box3().setFromObject(model).max.y;
     const marker = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.45, 5), new THREE.MeshBasicMaterial({ color: COLORS[side] })); marker.rotation.x = Math.PI; marker.position.y = h + 0.55; root.add(marker);
-    const label = textSprite(`${side === 'A' ? '1P' : '2P'} ${LABEL[side]}`, '#fff', side === 'A' ? 'rgba(58,160,255,.85)' : 'rgba(255,159,46,.85)', 0.7); label.position.y = h + 1.15; root.add(label);
-    const abil = textSprite('', '#fff', 'rgba(0,0,0,0)', 0.6); abil.position.y = h + 1.65; abil.visible = false; root.add(abil);
+    const label = textSprite(`${PNUM[side]} ${LABEL[side]}`, '#fff', `${CSS[side]}dd`, 0.7); label.position.y = h + 1.15; root.add(label);
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.6, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false })); ring.rotation.x = -Math.PI / 2; ring.visible = false; root.add(ring);
+    const quake = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 40), new THREE.MeshBasicMaterial({ color: 0xffd46d, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })); quake.rotation.x = -Math.PI / 2; quake.position.y = 0.04; quake.visible = false; root.add(quake);
+    const shield = new THREE.Mesh(new THREE.SphereGeometry(0.85, 20, 16), new THREE.MeshBasicMaterial({ color: 0x64eba6, transparent: true, opacity: 0.22, depthWrite: false })); shield.position.y = 0.7; shield.visible = false; root.add(shield);
+    const whirl = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.06, 8, 32), new THREE.MeshBasicMaterial({ color: 0xc997ff, transparent: true, opacity: 0.8 })); whirl.rotation.x = Math.PI / 2; whirl.position.y = 0.5; whirl.visible = false; root.add(whirl);
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.42, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false })); shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.015; root.add(shadow);
+    const revive = hpBar(1.1); revive.position.y = 1.2; revive.visible = false; revive.userData.fg.material.color.setHex(0x64eba6); root.add(revive);
+    const downLabel = textSprite('倒地！靠近救援', '#fff', 'rgba(255,79,122,.9)', 0.7); downLabel.position.y = 1.7; downLabel.visible = false; root.add(downLabel);
     root.visible = false; world.add(root);
-    playerViews[side] = {
-      root, model, marker, label, abil, ring, shadow, abilKind: null, h,
-      parts: { armL: model.getObjectByName('Arm_L'), armR: model.getObjectByName('Arm_R'), legL: model.getObjectByName('Leg_L'), legR: model.getObjectByName('Leg_R') },
-      pos: new THREE.Vector3(), phase: 0,
-    };
+    playerViews[side] = { root, tilt, model, marker, label, ring, quake, shield, whirl, shadow, revive, downLabel, h, parts: { armL: model.getObjectByName('Arm_L'), armR: model.getObjectByName('Arm_R'), legL: model.getObjectByName('Leg_L'), legR: model.getObjectByName('Leg_R') }, pos: new THREE.Vector3(), phase: 0, downTilt: 0 };
   }
-  // 每位玩家的目標光柱 / 箭頭 / 地面虛線
-  for (const side of ['A', 'B']) {
-    const g = new THREE.Group();
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 6, 16, 1, true), new THREE.MeshBasicMaterial({ color: COLORS[side], transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
-    beam.position.y = 3.5; g.add(beam);
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.75, 32), new THREE.MeshBasicMaterial({ color: COLORS[side], transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
-    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; g.add(ring);
-    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 6), new THREE.MeshBasicMaterial({ color: COLORS[side] })); arrow.rotation.x = Math.PI; arrow.position.y = 2.2; g.add(arrow);
-    const label = textSprite('', '#fff', side === 'A' ? 'rgba(58,160,255,.9)' : 'rgba(255,159,46,.9)', 0.8); label.position.y = 3.1; g.add(label);
-    g.visible = false; world.add(g);
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineDashedMaterial({ color: COLORS[side], dashSize: 0.3, gapSize: 0.2, transparent: true, opacity: 0.85 }));
-    line.visible = false; line.renderOrder = 7; world.add(line);
-    goalViews[side] = { g, beam, ring, arrow, label, line, text: '' };
-  }
-  // 鏡頭範圍
-  const bz = s.boss.anchor.z - 2.4;
-  worldBounds = { minX: cellX(-0.6), maxX: Math.max(cellX(gridInfo.cols - 0.4), s.tower.x + 1.6), minZ: bz, maxZ: cellZ(gridInfo.rows - 0.4) };
+  worldBounds = { minX: cellX(-0.4), maxX: cellX(gridInfo.cols - 0.6), minZ: s.gate.z - 2.4, maxZ: cellZ(gridInfo.rows - 0.6) };
   resize();
 }
 
-// 地磚 / 平台 / 長回預告 同步
 function syncTiles(s) {
   const seen = new Set();
-  for (const [c, r, spring] of s.tiles) {
-    const k = `${c},${r}`; seen.add(k);
-    let m = tileMeshes.get(k);
-    if (m && m.userData.spring !== !!spring) { tilesGroup.remove(m); tileMeshes.delete(k); m = null; }
-    if (!m) {
-      m = (spring ? models.spring : models.tile).clone(); m.userData.spring = !!spring; m.userData.born = performance.now();
-      m.position.set(cellX(c), 0, cellZ(r)); tilesGroup.add(m); tileMeshes.set(k, m);
-    }
-  }
+  for (const [c, r] of s.tiles) { const k = `${c},${r}`; seen.add(k); if (!tileMeshes.has(k)) { const m = models.tile.clone(); m.userData.born = performance.now(); m.position.set(cellX(c), 0, cellZ(r)); tilesGroup.add(m); tileMeshes.set(k, m); } }
   for (const [k, m] of tileMeshes) if (!seen.has(k)) { tilesGroup.remove(m); tileMeshes.delete(k); }
-  const seenP = new Set();
-  for (const [c, r, spring, top, loose, remain] of s.plats) {
-    const k = `${c},${r}`; seenP.add(k);
-    let m = platMeshes.get(k);
-    if (m && (m.userData.spring !== !!spring || m.userData.top !== top)) { platsGroup.remove(m); platMeshes.delete(k); m = null; }
-    if (!m) {
-      m = new THREE.Group();
-      const body = (spring ? models.spring : models.tile).clone(); m.add(body);
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.95, 0.07, 8, 32), mat(0xa66b3a)); rim.rotation.x = Math.PI / 2; rim.position.y = -0.02; rim.visible = false; m.add(rim);
-      m.userData = { spring: !!spring, top, rim, born: performance.now() };
-      m.position.set(cellX(c), top, cellZ(r)); platsGroup.add(m); platMeshes.set(k, m);
-    }
-    m.userData.loose = !!loose; m.userData.remain = remain; m.userData.rim.visible = !loose;
-  }
-  for (const [k, m] of platMeshes) if (!seenP.has(k)) { platsGroup.remove(m); platMeshes.delete(k); }
   const seenG = new Set();
-  for (const g of s.regrow) {
-    const k = `${g.c},${g.r}`; seenG.add(k);
-    if (platMeshes.has(k) || tileMeshes.has(k)) continue;
-    let m = ghostMeshes.get(k);
-    if (!m) {
-      m = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.1, 1.3), new THREE.MeshBasicMaterial({ color: g.kind === 'spring' ? 0xf2c230 : 0x9fe3a0, transparent: true, opacity: 0.25, wireframe: false }));
-      m.position.set(cellX(g.c), -0.05, cellZ(g.r)); ghostGroup.add(m); ghostMeshes.set(k, m);
+  for (const g of s.regrow) { const k = `${g.c},${g.r}`; seenG.add(k); if (tileMeshes.has(k)) continue; let m = ghostMeshes.get(k); if (!m) { m = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 1.3), new THREE.MeshBasicMaterial({ color: 0x9fe3a0, transparent: true, opacity: 0.2 })); m.position.set(cellX(g.c), -0.05, cellZ(g.r)); markGroup.add(m); ghostMeshes.set(k, m); } }
+  for (const [k, m] of ghostMeshes) if (!seenG.has(k)) { markGroup.remove(m); ghostMeshes.delete(k); }
+}
+const ENEMY_SCALE = { grunt: 1.35, ranged: 1.25, elite: 1.2 };
+function syncEnemies(s) {
+  const seen = new Set();
+  for (const e of s.enemies) {
+    seen.add(e.id);
+    let v = enemyViews.get(e.id);
+    if (!v) {
+      const root = new THREE.Group(); const model = models[e.kind].clone(); model.scale.setScalar(ENEMY_SCALE[e.kind]); root.add(model);
+      const h = new THREE.Box3().setFromObject(model).max.y;
+      const bar = hpBar(e.kind === 'elite' ? 1.4 : 0.9); bar.position.y = h + 0.35; bar.visible = false; root.add(bar);
+      const tele = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.7, 24), new THREE.MeshBasicMaterial({ color: 0xff4040, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false })); tele.rotation.x = -Math.PI / 2; tele.position.y = 0.03; tele.visible = false; root.add(tele);
+      let charge = null;
+      if (e.kind === 'elite') { // 衝撞線：外層群組轉朝向、內層平面拉長
+        charge = new THREE.Group();
+        const plane = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1), new THREE.MeshBasicMaterial({ map: arrowTex, color: 0xff3a2a, transparent: true, opacity: 0.85, depthWrite: false }));
+        plane.rotation.x = -Math.PI / 2; plane.renderOrder = 6; charge.add(plane); charge.userData.plane = plane; charge.visible = false; markGroup.add(charge);
+      }
+      const chain = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0x8becff, transparent: true, opacity: 0.9 })); chain.visible = false; markGroup.add(chain);
+      v = { root, model, bar, tele, charge, chain, h, pos: new THREE.Vector3(e.x, e.y, e.z), parts: { head: model.getObjectByName('Head'), clawL: model.getObjectByName('Claw_L'), clawR: model.getObjectByName('Claw_R'), footL: model.getObjectByName('Foot_L'), footR: model.getObjectByName('Foot_R'), hover: model.getObjectByName('HoverBody'), finL: model.getObjectByName('Fin_L'), finR: model.getObjectByName('Fin_R'), socket: model.getObjectByName('ProjectileSocket'), ram: model.getObjectByName('RamGuard'), light: model.getObjectByName('ChargeLight') }, phase: Math.random() * 6 };
+      if (v.parts.light && v.parts.light.material) v.parts.light.material = v.parts.light.material.clone();
+      if (v.parts.socket) { const glow = sphere(0.12, new THREE.MeshBasicMaterial({ color: 0x8ad6ff, transparent: true, opacity: 0.9 }), 0, 0, 0, 10); glow.visible = false; v.parts.socket.add(glow); v.glow = glow; }
+      enemyGroup.add(root); enemyViews.set(e.id, v);
     }
-    m.userData.in = g.in;
+    v.data = e;
   }
-  for (const [k, m] of ghostMeshes) if (!seenG.has(k)) { ghostGroup.remove(m); ghostMeshes.delete(k); }
+  for (const [id, v] of enemyViews) if (!seen.has(id)) { enemyGroup.remove(v.root); if (v.charge) markGroup.remove(v.charge); markGroup.remove(v.chain); enemyViews.delete(id); }
+  while (projMeshes.length < s.projectiles.length) { const m = models.orb.clone(); m.scale.setScalar(1.3); world.add(m); projMeshes.push(m); }
+  projMeshes.forEach((m, i) => { const q = s.projectiles[i]; m.visible = !!q; if (q) m.position.set(q.x, q.y, q.z); });
+  while (spawnDecals.length < s.spawning.length) { const d = decal(ringTex, 0xffffff, 1.3, 0.8); markGroup.add(d); spawnDecals.push(d); }
+  spawnDecals.forEach((d, i) => { const sp = s.spawning[i]; d.visible = !!sp; if (sp) { d.position.set(cellX(sp.c), 0.03, cellZ(sp.r)); d.material.color.setHex(sp.kind === 'elite' ? 0xff6a3a : sp.kind === 'ranged' ? 0xb07cff : 0xff5050); } });
 }
 
-// ---------- 狀態事件 → HUD ----------
-let lastEventT = -1, bannerUntil = 0;
-let built = false;
+// ---------- 狀態 → HUD ----------
+let lastEventT = -1, bannerUntil = 0, built = false, lastPhase = null;
 function onState(s) {
   if (!built) { if (!models.tile) return; buildStatic(s); built = true; }
-  syncTiles(s);
+  syncTiles(s); syncEnemies(s);
   const ev = s.lastEvent;
   if (ev && ev.t !== lastEventT) {
     lastEventT = ev.t;
-    if (!ev.quiet && ev.text) {
-      const b = $('banner'); b.textContent = ev.text; b.style.color = ev.side ? CSS_COLORS[ev.side] : (ev.type === 'win' ? '#7dff9a' : ev.type === 'lose' ? '#ff6b6b' : '#fff');
-      b.classList.add('on'); bannerUntil = performance.now() + (ev.type === 'win' || ev.type === 'lose' ? 6000 : 2600);
-    }
-    if (ev.type === 'bell') bellSwing = 1;
+    if (!ev.quiet && ev.text) { const b = $('banner'); b.textContent = ev.text; b.style.color = ev.side ? CSS[ev.side] : (ev.type === 'win' ? '#7dff9a' : ev.type === 'lose' ? '#ff6b6b' : '#fff'); b.classList.add('on'); bannerUntil = performance.now() + (ev.type === 'win' || ev.type === 'lose' ? 6000 : 2800); }
   }
   updateHud(s);
 }
-let bellSwing = 0;
-
-let lastPhase = null;
 function updateHud(s) {
-  const lobby = s.phase === 'lobby';
-  if (s.phase !== lastPhase) { lastPhase = s.phase; if (lobby || s.phase === 'countdown') { $('banner').classList.remove('on'); bannerUntil = 0; } }
-  $('lobby').classList.toggle('hidden', !lobby);
-  $('result').classList.toggle('hidden', !(s.phase === 'win' || s.phase === 'lose'));
-  $('countdown').classList.toggle('hidden', s.phase !== 'countdown');
-  if (s.phase === 'countdown') $('countdown').textContent = Math.ceil(s.countdown) || 'GO';
-  if (s.phase === 'win' || s.phase === 'lose') { $('resultTitle').textContent = s.phase === 'win' ? '🎉 核心粉碎！' : '⏰ 時間到'; $('resultText').textContent = s.phase === 'win' ? `島保住了！用時 ${fmt(300 - s.timeLeft)}` : '巨怪還在，島被啃光了……'; }
-  const t = $('timer'); t.textContent = fmt(s.timeLeft); t.classList.toggle('low', s.timeLeft <= 30 && s.phase === 'play');
-  // 巨怪 HP
-  const hp = $('hp');
-  while (hp.children.length - 1 < s.boss.maxHp) { const h = document.createElement('i'); h.className = 'heart'; hp.appendChild(h); }
-  [...hp.querySelectorAll('.heart')].forEach((h, i) => h.classList.toggle('off', i >= s.boss.hp));
-  $('mode').textContent = s.bots ? '你 + 電腦搭檔（窗口加長）' : s.mode >= 2 ? '雙人合作' : s.mode === 1 ? '單人模式（窗口加長）' : '等待玩家';
-  // 玩家卡
-  const cards = [];
-  for (const side of ['A', 'B']) {
+  const ph = s.phase;
+  if (ph !== lastPhase) { lastPhase = ph; if (ph === 'lobby' || ph === 'countdown') { $('banner').classList.remove('on'); bannerUntil = 0; } }
+  $('lobby').classList.toggle('hidden', ph !== 'lobby');
+  $('result').classList.toggle('hidden', !(ph === 'win' || ph === 'lose'));
+  $('countdown').classList.toggle('hidden', ph !== 'countdown');
+  $('transition').classList.toggle('hidden', !(ph === 'transition' && s.transition && s.transition.kind !== 'upgradeDone'));
+  $('upgrade').classList.toggle('hidden', ph !== 'upgrade');
+  if (ph === 'countdown') $('countdown').textContent = Math.ceil(s.countdown) || 'GO';
+  if (ph === 'transition' && s.transition) { $('transTitle').textContent = s.transition.kind === 'boss' ? '🚪 進入 Boss 房' : '🚪 關卡門打開'; $('transText').textContent = s.transition.text; }
+  if (ph === 'win' || ph === 'lose') { $('resultTitle').textContent = ph === 'win' ? '🎉 核心粉碎！' : '💀 全員倒地'; $('resultText').textContent = `${ph === 'win' ? '島保住了！' : '島被啃光了……'} 用時 ${fmt(s.elapsed)} ・ 全隊擊倒 ${s.kills} 隻 ・ 倒地 ${s.stats.downs} 次、救援 ${s.stats.revives} 次`; }
+  const inRun = ph === 'wave' || ph === 'boss' || ph === 'upgrade' || ph === 'transition';
+  $('timer').textContent = fmt(s.elapsed);
+  if (ph === 'boss') { $('stageName').textContent = 'Boss 房：方塊巨怪'; $('stageSub').textContent = s.boss ? ({ intro: '牠醒了', rest: '準備咬地板', aim: '標記咬擊範圍', lock: '鎖定！', lunge: '咬下', exposed: '核心露出！', recoil: '縮回', minions: `雜兵 ×${s.stage.remaining}` }[s.boss.state] || '') : ''; }
+  else if (inRun) { $('stageName').textContent = s.stage.name; $('stageSub').textContent = s.stage.wave > 0 ? `第 ${Math.min(s.stage.wave, s.stage.waveCount)}/${s.stage.waveCount} 波 ・ 剩 ${s.stage.remaining} 隻` : '準備'; }
+  else { $('stageName').textContent = '島口大開'; $('stageSub').textContent = `${s.stage.count} 關 + Boss`; }
+  const th = s.thresholds; const nextIdx = Math.min(s.upgradesEarned, th.length - 1); const next = th[nextIdx]; const prev = nextIdx > 0 ? th[nextIdx - 1] : 0;
+  $('killText').textContent = `全隊擊倒 ${s.kills}`;
+  const maxed = s.upgradesEarned >= th.length;
+  $('killSub').textContent = maxed ? '升級已滿' : `下一次升級 ${next}${s.upgradesEarned > s.upgradesDone ? '（這波清完就選）' : ''}`;
+  $('killBar').style.width = maxed ? '100%' : `${Math.round(Math.max(0, Math.min(1, (s.kills - prev) / (next - prev))) * 100)}%`;
+  $('bossPill').style.display = s.boss ? '' : 'none';
+  if (s.boss) { $('bossBar').style.width = `${(s.boss.hp / s.boss.maxHp) * 100}%`; $('bossSub').textContent = `${s.boss.hp} / ${s.boss.maxHp}`; }
+  $('players').innerHTML = SIDES.map((side) => {
     const p = s.players[side];
-    const ab = p.ability ? `<span class="tag ${p.ability}">${s.abilities[p.ability].name}</span>` : '';
-    let st = !p.connected ? '未加入' : p.bot && p.dead ? `電腦 · 掉下島… ${p.respawnIn.toFixed(1)}s` : p.dead ? `掉下島… ${p.respawnIn.toFixed(1)}s` : p.pad && p.padT ? `選擇中 ${Math.round(p.padT * 100)}%` : p.onTower ? '在鐘樓上' : s.marks.target === side && s.phase === 'play' ? '被盯上！' : (p.bot ? '電腦搭檔' : p.kb ? '鍵盤' : '手機');
-    cards.push(`<div class="pcard pill ${side} ${p.connected ? '' : 'off'}"><div class="dot"></div><div><b>${side === 'A' ? '1P' : '2P'} ${LABEL[side]}${p.name && !p.kb && !p.bot ? ' · ' + esc(p.name) : ''}</b>${ab}<div class="st">${st}</div></div></div>`);
-  }
-  $('players').innerHTML = cards.join('');
-  const n = s.mode;
-  $('joinLine').textContent = n === 0 ? '等待手機加入…（或按 1 / 2 用鍵盤試玩）' : s.bots ? '電腦搭檔就位：向前短推開始！' : n === 1 ? '1 位玩家已加入：向前短推開始單人模式、等第二位加入，或按 B 加電腦搭檔' : '2 位玩家都到了：任一人向前短推開始！';
-  // 階段列
-  $('steps').classList.toggle('hidden', s.phase !== 'play');
-  for (const el of $('steps').children) { const n = Number(el.dataset.step); el.classList.toggle('on', n === s.step); el.classList.toggle('done', n < s.step); }
-  if (s.phase === 'play' && s.step !== lastStep) {
-    if (lastStep !== 0) { const el = [...$('steps').children].find((e) => Number(e.dataset.step) === s.step); const b2 = $('banner'); b2.textContent = `${el.querySelector('b').textContent}：${el.querySelector('small').textContent}`; b2.style.color = '#d9ff4a'; b2.classList.add('on'); bannerUntil = performance.now() + 3200; }
-    lastStep = s.step;
-  }
-  if (s.phase !== 'play') lastStep = 0;
-  // 底部：每位玩家一句「現在做什麼」+ 一行說明
-  const goals = [];
-  for (const side of ['A', 'B']) { const p = s.players[side]; if (p.connected && !p.bot && p.goal) goals.push(`<div class="goal ${side} ${p.goal.urgent ? 'urgent' : ''}">${side === 'A' ? '🔵' : '🟠'} ${esc(p.goal.text)}</div>`); }
-  $('hintText').innerHTML = goals.length ? goals.join('') + `<div class="ctx">${hintFor(s)}</div>` : hintFor(s);
+    const hearts = Array.from({ length: p.maxHp }, (_, i) => `<i class="${i < p.hp ? '' : 'off'}"></i>`).join('') + Array.from({ length: p.shield || 0 }, () => '<i class="sh"></i>').join('');
+    const skills = Object.entries(p.skills || {}).map(([id, lv]) => `<img src="/assets/island/skills/${s.skills[id].icon}" title="${s.skills[id].name}">${lv >= 2 ? '<span class="lv">2</span>' : ''}`).join('');
+    const st = !p.connected ? '未加入' : p.downed ? (p.helper ? `救援中 ${Math.round(p.reviveT * 100)}%` : '倒地！') : ph === 'upgrade' && p.pick ? (p.pick.done ? '已選' : '選技能中…') : (p.kb ? '鍵盤' : '手機');
+    return `<div class="pcard pill ${p.connected ? '' : 'off'}"><div class="dot bg-${side}"></div><div><b class="${side}">${PNUM[side]} ${LABEL[side]}${p.name && !p.kb ? ' · ' + esc(p.name) : ''}</b><div class="hearts">${p.connected ? hearts : ''}</div><div class="skills">${skills}</div><div class="st">${st}</div></div></div>`;
+  }).join('');
+  $('slots').innerHTML = SIDES.map((side) => `<div class="slot ${side} ${s.players[side].connected ? 'on' : ''}">${PNUM[side]} ${LABEL[side]}<br><small style="color:var(--muted)">${s.players[side].connected ? (s.players[side].kb ? '鍵盤' : '已加入') : '空位'}</small></div>`).join('');
+  $('joinLine').textContent = s.n === 0 ? '等待手機加入…（或按 1～4 用鍵盤試玩）' : `${s.n} 位已加入：任一人向前短推開始，或等更多人`;
+  if (ph === 'upgrade' && s.upgrade) renderUpgrade(s);
+  $('hintText').innerHTML = hintFor(s);
 }
-let lastStep = 0;
+function renderUpgrade(s) {
+  $('upgradeTitle').textContent = `第 ${s.upgrade.index} 次升級：每人選一項（${Math.ceil(s.upgrade.remain)} 秒）`;
+  $('upgradeCols').innerHTML = SIDES.filter((side) => s.players[side].connected).map((side) => {
+    const p = s.players[side]; const pick = p.pick || {};
+    const opts = s.upgrade.options.map((o, i) => {
+      const lv = p.skills[o.id] || 0; const dim = lv >= 2; const cur = pick.cursor === i && !pick.done;
+      return `<div class="uopt ${side} ${cur ? 'cur' : ''} ${dim ? 'dim' : ''}"><img src="/assets/island/skills/${o.icon}"><div><b style="color:var(--text)">${o.name} ${lv ? `<span class="lvtag">${dim ? 'Lv2 已滿' : '→ 強化 Lv2'}</span>` : ''}</b><small>${lv ? o.lv2 : o.desc}</small></div></div>`;
+    }).join('');
+    const foot = pick.done ? `<div class="udone">✓ 已選 ${s.skills[pick.choice]?.name || ''}</div>` : `<div class="ubar"><i style="width:${Math.round((pick.confirm || 0) * 100)}%"></i></div><div style="font-size:12px;color:var(--muted);margin-top:4px">${pick.confirm > 0.05 ? '回正停住中…' : '左右傾斜切換，回正停住確認'}</div>`;
+    return `<div class="ucol ${side}"><h2>${PNUM[side]} ${LABEL[side]}</h2>${opts}${foot}</div>`;
+  }).join('');
+}
 function hintFor(s) {
-  if (s.phase === 'lobby') return '手機掃 QR code 加入 → 向前短推開始。一個人也能玩，兩個人更快。';
-  if (s.phase === 'countdown') return '準備！傾斜走位、手腕短抬跳躍、向前短推敲擊';
-  if (s.phase === 'win') return '島保住了！向前短推或 Enter 再來一局';
-  if (s.phase === 'lose') return '再試一次：向前短推或 Enter 重開';
-  const b = s.boss;
-  const springPlat = s.plats.find((p) => p[2] === 1);
-  const springInZone = springPlat && s.bridge.some(([c, r]) => c === springPlat[0] && r === springPlat[1]);
-  if (s.flight) return s.flight.ok ? '磚飛出去了！落地後會變成可踩的平台' : '<span class="zone-bad">磚飛出島外了……</span>彈簧磚會長回原位，再引一次';
-  if (b.state === 'open') return `<span class="zone-ok">防護打開 ${b.openRemain.toFixed(1)} 秒</span>：靠近巨怪嘴前的粉紅核心，向前短推敲它！`;
-  if (b.state === 'stuck') {
-    const pr = s.preds.find((p) => p.ready) || s.preds[0];
-    const where = pr ? (pr.inZone ? '<span class="zone-ok">落點對準斷橋 ✓</span>' : pr.ok ? '落點在島上（移動位置，讓黃色落點進到虛線格）' : '<span class="zone-bad">落點在海裡！換個方向</span>') : '走到巨怪側邊，黃色標記就是磚的落點';
-    return `巨怪卡住 ${b.stuckRemain.toFixed(1)} 秒！${b.held === 'spring' ? '咬的是彈簧磚：' : ''}從側邊向前短推敲它 ・ ${where}`;
+  const ph = s.phase;
+  if (ph === 'lobby') return '手機掃 QR code 加入（1～4 人）→ 任一人向前短推開始';
+  if (ph === 'countdown') return '傾斜走位、短抬跳躍，靠近敵人會自動敲';
+  if (ph === 'upgrade') return '每人在自己的欄位選一項：左傾 / 右傾切換，回正停住 1.2 秒確認';
+  if (ph === 'transition') return s.transition?.text || '';
+  if (ph === 'win') return '島保住了！向前短推或 E 再來一局';
+  if (ph === 'lose') return '再試一次：向前短推或 E 重開';
+  const downed = SIDES.filter((x) => s.players[x].connected && s.players[x].downed);
+  if (downed.length && s.n >= 2) return `<span style="color:#ff6b6b">${downed.map((x) => PNUM[x] + ' ' + LABEL[x]).join('、')} 倒地！</span>隊友靠近站著 2 秒救起（護友更快）`;
+  if (ph === 'boss' && s.boss) {
+    const b = s.boss;
+    if (b.state === 'exposed') return `<span style="color:#ff9fe8">核心露出 ${b.exposeRemain.toFixed(1)} 秒！</span>所有人到洞的南邊上前打`;
+    if (b.state === 'aim' || b.state === 'lock') return `巨怪盯上 ${PNUM[b.target]} ${LABEL[b.target]}：地上的牙印範圍會被咬掉，站在上面會掉下去`;
+    if (b.state === 'minions') return `雜兵 ${s.stage.remaining} 隻：清場的清場、留在巨怪旁的準備打核心`;
+    return '方塊巨怪準備咬地板，注意地上的牙印';
   }
-  if (springInZone) {
-    const anyTower = Object.values(s.players).some((p) => p.onTower);
-    return anyTower ? '站在鐘樓上，靠近鐘向前短推敲鐘！' : '彈簧磚就位：走到斷橋旁踩上去，空中傾斜朝鐘樓，落在平台上敲鐘';
-  }
-  if (springPlat) return '彈簧磚落在島上：踩上去也能彈，但要落在鐘樓平台才行；或等它崩落長回原位再引一次';
-  if (b.state === 'aim' || b.state === 'lock') {
-    const t = b.target ? LABEL[b.target] : '';
-    const springTile = s.tiles.find((t2) => t2[2] === 1);
-    return `${t} 被盯上：${springTile ? '站到金色彈簧磚上，' : '站到想讓它咬的磚上，'}白色咬痕是候選格，<b style="color:#ff6b6b">紅色鎖定</b>出現就跳開`;
-  }
-  if (!s.tiles.some((t2) => t2[2] === 1)) { const g = s.regrow.find((x) => x.kind === 'spring'); return g ? `彈簧磚 ${Math.ceil(g.in)} 秒後長回原位，先避開巨怪` : '引巨怪咬下金色彈簧磚'; }
-  return '引巨怪咬下金色彈簧磚：被盯上的人站上去，鎖定後跳開，搭檔準備在側邊敲';
+  if (s.upgradesEarned > s.upgradesDone) return `升級門檻已達！清掉這波剩下的 ${s.stage.remaining} 隻就選技能`;
+  const elite = s.enemies.find((e) => e.kind === 'elite' && !e.dead);
+  if (elite && elite.state === 'windup') return '<span style="color:#ff6b6b">精英怪蓄力衝撞！</span>離開紅色箭頭那條線';
+  if (s.stage.idx === 1 && s.enemies.some((e) => e.kind === 'ranged' && !e.dead)) return '遠程怪會保持距離射擊：分一個人去追它，別全擠在一起';
+  return `清掉這波：剩 ${s.stage.remaining} 隻 ・ 全隊共用擊倒數，誰補最後一下都一樣`;
 }
 function fmt(sec) { sec = Math.max(0, Math.round(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`; }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -505,241 +345,143 @@ function frame(now) {
   const dt = Math.min(0.05, (now - lastFrame) / 1000); lastFrame = now;
   if (now > bannerUntil) $('banner').classList.remove('on');
   if (!state || !built) { renderer.render(scene, camera); return; }
-  const s = state;
-  const age = Math.min(0.12, (now - stateAt) / 1000);
-  const k = 1 - Math.exp(-dt * 18);
-  const T = now / 1000;
+  const s = state, age = Math.min(0.12, (now - stateAt) / 1000), k = 1 - Math.exp(-dt * 18), T = now / 1000;
+  const frozen = s.phase === 'upgrade' || s.phase === 'transition';
 
-  // 玩家
-  for (const side of ['A', 'B']) {
+  for (const side of SIDES) {
     const p = s.players[side], v = playerViews[side];
-    v.root.visible = p.connected && !p.dead;
-    if (!v.root.visible) continue;
-    tmpV.set(p.x + p.vx * age, p.y + (p.grounded ? 0 : p.vy * age), p.z + p.vz * age);
+    v.root.visible = p.connected;
+    if (!p.connected) continue;
+    tmpV.set(p.x + (frozen ? 0 : p.vx * age), p.y + (p.grounded || frozen ? 0 : p.vy * age), p.z + (frozen ? 0 : p.vz * age));
     if (v.pos.distanceTo(tmpV) > 3) v.pos.copy(tmpV); else v.pos.lerp(tmpV, k);
     v.root.position.copy(v.pos);
     v.model.rotation.y = lerpAngle(v.model.rotation.y, p.facing, k);
-    const speed = Math.hypot(p.vx, p.vz);
-    v.phase += dt * (6 + speed * 2.2);
-    const run = Math.min(1, speed / 3.5);
+    v.downTilt = lerp(v.downTilt, p.downed ? 1 : 0, 1 - Math.exp(-dt * 8));
+    v.tilt.rotation.x = -1.45 * v.downTilt; v.tilt.position.y = 0.25 * v.downTilt;
+    v.revive.visible = p.downed && p.reviveT > 0.02; v.revive.userData.fg.scale.x = v.revive.userData.width * Math.min(1, p.reviveT);
+    v.downLabel.visible = p.downed && s.n >= 2 && !v.revive.visible;
+    const speed = Math.hypot(p.vx, p.vz); v.phase += dt * (6 + speed * 2.2); const run = Math.min(1, speed / 3.5);
     const { armL, armR, legL, legR } = v.parts;
-    if (!p.grounded) {
-      if (legL) legL.rotation.x = lerp(legL.rotation.x, -0.7, k); if (legR) legR.rotation.x = lerp(legR.rotation.x, 0.4, k);
-      if (armL) armL.rotation.x = lerp(armL.rotation.x, -2.4, k);
+    if (!p.grounded) { if (legL) legL.rotation.x = lerp(legL.rotation.x, -0.7, k); if (legR) legR.rotation.x = lerp(legR.rotation.x, 0.4, k); if (armL) armL.rotation.x = lerp(armL.rotation.x, -2.4, k); }
+    else { const sw = Math.sin(v.phase) * 0.75 * run; if (legL) legL.rotation.x = sw; if (legR) legR.rotation.x = -sw; if (armL) armL.rotation.x = -sw * 0.8; }
+    if (armR) { const h = p.hitAge; let target = p.grounded ? Math.sin(v.phase) * 0.75 * run : -1.2; if (h < 0.08) target = 2.2; else if (h < 0.3) target = lerp(2.2, -1.3, (h - 0.08) / 0.22); else if (h < 0.5) target = lerp(-1.3, target, (h - 0.3) / 0.2); armR.rotation.x = lerp(armR.rotation.x, target, h < 0.5 ? 0.6 : k); }
+    v.marker.position.y = v.h + 0.55 + Math.sin(T * 4 + SIDES.indexOf(side)) * 0.08; v.marker.rotation.y = T * 2;
+    v.ring.visible = p.hitAge < 0.25; if (v.ring.visible) { const q = p.hitAge / 0.25; v.ring.scale.setScalar(0.6 + q * 1.3); v.ring.material.opacity = 0.8 * (1 - q); }
+    v.quake.visible = p.quakeAge < 0.5; if (v.quake.visible) { const q = p.quakeAge / 0.5; v.quake.scale.setScalar(0.3 + q * (p.quakeR || 2.2)); v.quake.material.opacity = 0.9 * (1 - q); }
+    v.shield.visible = p.shield > 0; if (v.shield.visible) v.shield.material.opacity = 0.18 + Math.sin(T * 6) * 0.06;
+    v.whirl.visible = p.whirl; if (p.whirl) { v.whirl.rotation.z = T * 12; v.whirl.scale.setScalar(1 + Math.sin(T * 20) * 0.1); }
+    v.model.visible = !(p.invuln && !p.downed && Math.floor(T * 14) % 2 === 0 && p.hurtAge < 1.0);
+    v.shadow.position.y = -p.y + 0.015; v.shadow.visible = p.y > -1;
+    v.marker.scale.setScalar(s.boss && s.boss.target === side && (s.boss.state === 'aim' || s.boss.state === 'lock') ? 1.3 + Math.sin(T * 10) * 0.25 : 1);
+  }
+
+  for (const v of enemyViews.values()) {
+    const e = v.data; const P = v.parts;
+    tmpV.set(e.x, e.y, e.z); if (v.pos.distanceTo(tmpV) > 3) v.pos.copy(tmpV); else v.pos.lerp(tmpV, 1 - Math.exp(-dt * 16));
+    v.root.position.copy(v.pos); v.root.rotation.y = lerpAngle(v.root.rotation.y, e.facing, k);
+    v.phase += dt * 8;
+    if (e.dead) { const q = Math.min(1, e.deadAge / 0.6); v.root.scale.setScalar(Math.max(0.01, 1 - q)); v.root.position.y += q * 0.6; v.bar.visible = false; v.tele.visible = false; if (v.charge) v.charge.visible = false; v.chain.visible = false; continue; }
+    const hitPulse = e.hitAge < 0.15 ? 1 + 0.25 * (1 - e.hitAge / 0.15) : 1;
+    const spawnPop = e.state === 'spawn' ? Math.min(1, e.stateAge / 0.4) : 1;
+    v.root.scale.setScalar(hitPulse * spawnPop);
+    v.bar.visible = e.hp < e.maxHp; v.bar.userData.fg.scale.x = v.bar.userData.width * Math.max(0, e.hp / e.maxHp);
+    v.tele.visible = e.state === 'windup' && e.kind !== 'elite'; if (v.tele.visible) v.tele.scale.setScalar(1 + Math.sin(T * 16) * 0.12);
+    if (e.kind === 'grunt') {
+      const wind = e.state === 'windup' ? e.stateAge / 0.7 : 0;
+      if (P.clawL) P.clawL.rotation.x = e.state === 'windup' ? -1.2 * wind : (e.strikeAge < 0.2 ? 1.0 : Math.sin(v.phase) * 0.3); if (P.clawR) P.clawR.rotation.x = P.clawL ? P.clawL.rotation.x : 0;
+      if (P.footL) P.footL.rotation.x = Math.sin(v.phase) * 0.5; if (P.footR) P.footR.rotation.x = -Math.sin(v.phase) * 0.5;
+      if (P.head) P.head.rotation.x = e.state === 'windup' ? -0.3 * wind : 0;
+    } else if (e.kind === 'ranged') {
+      if (P.hover) P.hover.position.y = 0.64 + Math.sin(T * 3 + v.phase) * 0.08;
+      if (P.finL) P.finL.rotation.z = Math.sin(T * 6) * 0.4; if (P.finR) P.finR.rotation.z = -Math.sin(T * 6) * 0.4;
+      if (v.glow) { v.glow.visible = e.state === 'windup'; v.glow.scale.setScalar(0.6 + (e.stateAge / 0.7) * 1.4); }
     } else {
-      const sw = Math.sin(v.phase) * 0.75 * run;
-      if (legL) legL.rotation.x = sw; if (legR) legR.rotation.x = -sw;
-      if (armL) armL.rotation.x = -sw * 0.8;
+      const wind = e.state === 'windup' ? Math.min(1, e.stateAge / 1.1) : 0;
+      if (P.ram) P.ram.rotation.x = e.state === 'windup' ? -0.45 * wind : e.state === 'dash' ? 0.25 : e.state === 'stun' ? Math.sin(T * 10) * 0.15 : 0;
+      if (P.light && P.light.material && P.light.material.emissiveIntensity != null) P.light.material.emissiveIntensity = e.state === 'windup' ? 1 + Math.abs(Math.sin(T * 20)) * 3 : 0.8;
+      v.root.rotation.z = e.state === 'stun' ? Math.sin(T * 8) * 0.12 : 0;
+      if (v.charge) { v.charge.visible = (e.state === 'windup' || e.state === 'dash') && !!e.dir; if (v.charge.visible) { const len = e.dashLen || 7; const pl = v.charge.userData.plane; pl.scale.set(1, len, 1); v.charge.position.set(e.x + e.dir.x * len / 2, 0.035, e.z + e.dir.z * len / 2); v.charge.rotation.y = Math.atan2(e.dir.x, e.dir.z) + Math.PI; pl.material.opacity = e.state === 'windup' ? 0.5 + Math.sin(T * 14) * 0.35 : 0.9; } }
     }
-    // 敲擊：右臂舉起再揮下
-    if (armR) {
-      const h = p.hitAge;
-      let target = p.grounded ? Math.sin(v.phase) * 0.75 * run : -1.2;
-      if (h < 0.1) target = 2.4;
-      else if (h < 0.35) target = lerp(2.4, -1.3, (h - 0.1) / 0.25);
-      else if (h < 0.6) target = lerp(-1.3, target, (h - 0.35) / 0.25);
-      armR.rotation.x = lerp(armR.rotation.x, target, h < 0.6 ? 0.6 : k);
-    }
-    v.marker.position.y = v.h + 0.55 + Math.sin(T * 4 + (side === 'A' ? 0 : 1)) * 0.08;
-    v.marker.rotation.y = T * 2;
-    v.ring.visible = p.hitAge < 0.3; if (v.ring.visible) { const q = p.hitAge / 0.3; v.ring.scale.setScalar(0.6 + q * 1.4 * (p.ability === 'hammer' ? 1.6 : 1)); v.ring.material.opacity = 0.8 * (1 - q); }
-    v.shadow.position.y = -p.y + 0.015;
-    v.shadow.visible = p.y > -1;
-    if (p.ability !== v.abilKind) {
-      v.abilKind = p.ability; v.root.remove(v.abil);
-      if (p.ability) { v.abil = textSprite(s.abilities[p.ability].name, '#fff', p.ability === 'boots' ? 'rgba(166,107,58,.9)' : 'rgba(53,208,224,.9)', 0.55); v.abil.position.y = v.h + 1.65; v.root.add(v.abil); }
-    }
-    if (s.marks.target === side && s.phase === 'play' && (s.boss.state === 'aim' || s.boss.state === 'lock')) v.marker.scale.setScalar(1.3 + Math.sin(T * 10) * 0.25); else v.marker.scale.setScalar(1);
+    v.chain.visible = e.chainAge < 0.25 && !!e.chainFrom; if (v.chain.visible) { const pos = v.chain.geometry.attributes.position; pos.setXYZ(0, e.chainFrom.x, 0.7, e.chainFrom.z); pos.setXYZ(1, e.x, 0.7, e.z); pos.needsUpdate = true; v.chain.geometry.computeBoundingSphere(); }
   }
+  for (const m of projMeshes) if (m.visible) m.rotation.y = T * 6;
 
-  // 目標光柱
-  for (const side of ['A', 'B']) {
-    const p = s.players[side], gv = goalViews[side], goal = p.goal;
-    const show = p.connected && !p.bot && !p.dead && goal && goal.x != null && s.phase === 'play';
-    gv.g.visible = gv.line.visible = !!show;
-    if (!show) continue;
-    const top = topAt(goal.x, goal.z, s);
-    gv.g.position.set(goal.x, top, goal.z);
-    const urgent = goal.urgent ? 1 : 0;
-    gv.arrow.position.y = 2.2 + Math.sin(T * (urgent ? 9 : 4)) * (0.2 + urgent * 0.15);
-    gv.arrow.rotation.y = T * 2;
-    gv.ring.scale.setScalar(1 + Math.sin(T * (urgent ? 8 : 3)) * 0.15);
-    gv.beam.material.opacity = goal.act ? 0.45 + Math.sin(T * 12) * 0.15 : 0.26 + urgent * 0.1;
-    const short = goal.act ? '敲！' : { flee: '走開！', lure: '站這裡', core: '核心', knock: '敲這裡', bell: '鐘', spring: '彈簧磚', 'wait-core': '在這等', prep: '預備位', pad: '能力區', idle: '待命', hold: '別動', wait: '' }[goal.kind] || '';
-    if (short !== gv.text) { gv.text = short; gv.g.remove(gv.label); gv.label = textSprite(`${LABEL[side]} ${short}`, '#fff', side === 'A' ? 'rgba(58,160,255,.9)' : 'rgba(255,159,46,.9)', 0.8); gv.label.position.y = 3.1; gv.g.add(gv.label); }
-    gv.label.visible = !!short;
-    const pv = playerViews[side];
-    const pos = gv.line.geometry.attributes.position;
-    pos.setXYZ(0, pv.pos.x, pv.pos.y + 0.1, pv.pos.z); pos.setXYZ(1, goal.x, top + 0.1, goal.z); pos.needsUpdate = true;
-    gv.line.computeLineDistances(); gv.line.geometry.computeBoundingSphere();
-    gv.line.visible = Math.hypot(goal.x - pv.pos.x, goal.z - pv.pos.z) > 1.2;
-  }
+  if (gateObj) { gateObj.visible = s.phase !== 'boss' && !(s.phase === 'transition' && s.transition?.kind === 'boss' && s.transition.remain < 2); const open = s.phase === 'transition' && s.transition && s.transition.kind !== 'upgradeDone'; gateGlow.visible = gateObj.visible; gateGlow.material.opacity = open ? 0.45 + Math.sin(T * 6) * 0.2 : 0.08 + Math.sin(T * 2) * 0.04; gateGlow.lookAt(camera.position); }
+  if (shrineObj) { const on = s.phase === 'upgrade'; shrineObj.visible = on; shrineRing.visible = on; if (on) { if (crystal) crystal.rotation.y = T * 1.5; const q = (T % 1.5) / 1.5; shrineRing.scale.setScalar(0.5 + q * 1.5); shrineRing.material.opacity = 0.8 * (1 - q); } }
 
-  // 巨怪
   const b = s.boss;
-  tmpV.set(b.x, b.y, b.z);
-  bossObj.position.lerp(tmpV, 1 - Math.exp(-dt * 14));
-  if (b.state === 'stuck') { bossObj.position.x += (Math.random() - 0.5) * 0.08; bossObj.position.y += (Math.random() - 0.5) * 0.05; }
-  if (b.state === 'recoil') bossObj.position.x += Math.sin(T * 30) * 0.05;
-  // 卡住時嘴巴咬著磚半開；張嘴（瞄準 / 防護打開）上顎抬、下顎落
-  const open = b.state === 'stuck' ? 0.8 : b.mouth; // 卡住時嘴巴被磚撐開
-  if (bossParts.upper) bossParts.upper.rotation.x = lerp(bossParts.upper.rotation.x, -open * 0.38, 1 - Math.exp(-dt * 10));
-  if (bossParts.jaw) bossParts.jaw.rotation.x = lerp(bossParts.jaw.rotation.x, open * 0.6, 1 - Math.exp(-dt * 10));
-  if (bossParts.core) {
-    bossParts.core.visible = b.state === 'open';
-    if (!bossParts.core.userData.baseScale) bossParts.core.userData.baseScale = bossParts.core.scale.clone();
-    const pulse = 1 + Math.sin(T * 8) * 0.12 + (b.coreHitAge < 0.25 ? 0.6 * (1 - b.coreHitAge / 0.25) : 0);
-    bossParts.core.scale.copy(bossParts.core.userData.baseScale).multiplyScalar(pulse);
-    const cm = bossParts.core.material;
-    if (cm && cm.emissiveIntensity != null) cm.emissiveIntensity = 1.2 + Math.sin(T * 8) * 0.6;
-  }
-  bossObj.rotation.y = 0; bossObj.rotation.z = b.state === 'rest' || b.state === 'aim' ? Math.sin(T * 1.5) * 0.03 : 0;
-  // 嘴裡的磚
-  if (bossParts.socket) {
-    if (b.held && (!heldBrick || heldBrick.userData.kind !== b.held)) {
-      if (heldBrick) bossParts.socket.remove(heldBrick);
-      heldBrick = (b.held === 'spring' ? models.spring : models.tile).clone(); heldBrick.userData.kind = b.held;
-      heldBrick.scale.setScalar(0.95); heldBrick.position.set(0, 0.25, 0.45); heldBrick.rotation.set(0.95, 0, 0.1); // 像 art-preview 那樣斜咬在嘴裡、露出牙齒外、磚面朝鏡頭
-      bossParts.socket.add(heldBrick);
-    }
-    if (!b.held && heldBrick) { bossParts.socket.remove(heldBrick); heldBrick = null; }
-  }
+  bossObj.visible = !!b;
+  if (b) {
+    tmpV.set(b.x, b.y, b.z); bossObj.position.lerp(tmpV, 1 - Math.exp(-dt * 14));
+    if (b.state === 'exposed') bossObj.position.x += (Math.random() - 0.5) * 0.04;
+    const open = b.mouth;
+    if (bossParts.upper) bossParts.upper.rotation.x = lerp(bossParts.upper.rotation.x, -open * 0.38, 1 - Math.exp(-dt * 10));
+    if (bossParts.jaw) bossParts.jaw.rotation.x = lerp(bossParts.jaw.rotation.x, open * 0.6, 1 - Math.exp(-dt * 10));
+    if (bossParts.core) { bossParts.core.visible = b.state === 'exposed'; if (!bossParts.core.userData.base) bossParts.core.userData.base = bossParts.core.scale.clone(); const pulse = 1 + Math.sin(T * 8) * 0.12 + (b.coreHitAge < 0.25 ? 0.6 * (1 - b.coreHitAge / 0.25) : 0); bossParts.core.scale.copy(bossParts.core.userData.base).multiplyScalar(pulse); if (bossParts.core.material?.emissiveIntensity != null) bossParts.core.material.emissiveIntensity = 1.2 + Math.sin(T * 8) * 0.6; }
+    bossObj.rotation.y = lerpAngle(bossObj.rotation.y, b.rot || 0, 1 - Math.exp(-dt * 8));
+    bossObj.rotation.z = b.state === 'rest' || b.state === 'minions' ? Math.sin(T * 1.5) * 0.03 : 0;
+    const cands = b.state === 'aim' ? b.cands : [];
+    candDecals.forEach((d, i) => { const c = cands[i]; d.visible = !!c; if (c) { d.position.set(cellX(c[0]), 0.03, cellZ(c[1])); d.material.opacity = 0.5 + Math.sin(T * 3 + i) * 0.12; } });
+    const locked = (b.state === 'lock' || b.state === 'lunge') ? b.locked : [];
+    lockDecals.forEach((d, i) => { const c = locked[i]; d.visible = !!c; if (c) { d.position.set(cellX(c[0]), 0.04, cellZ(c[1])); d.scale.setScalar(1 + Math.sin(T * 14) * 0.1); } });
+    if (b.state === 'exposed' && b.core) {
+      weakSprite.visible = weakLabel.visible = coreBeacon.visible = coreLabel.visible = true;
+      weakSprite.position.set(b.core.x, b.core.y, b.core.z + 0.2); weakSprite.scale.setScalar(2.0 + Math.sin(T * 7) * 0.25); weakSprite.material.rotation = T * 1.5;
+      weakLabel.position.set(b.core.x, b.core.y + 1.9, b.core.z);
+      const cf = b.coreFront || { x: b.core.x, z: b.core.z + 1.4 };
+      coreBeacon.position.set(cf.x, 2.5, cf.z); coreBeacon.material.opacity = 0.25 + Math.sin(T * 10) * 0.1; coreLabel.position.set(cf.x, 1.3, cf.z);
+    } else weakSprite.visible = weakLabel.visible = coreBeacon.visible = coreLabel.visible = false;
+  } else { for (const d of candDecals) d.visible = false; for (const d of lockDecals) d.visible = false; weakSprite.visible = weakLabel.visible = coreBeacon.visible = coreLabel.visible = false; }
 
-  // 標記：候選咬痕 / 鎖定
-  const cands = s.phase === 'play' && (b.state === 'aim' || b.state === 'lock') ? s.marks.cands : [];
-  candDecals.forEach((d, i) => {
-    const c = cands[i];
-    d.visible = !!c && !(s.marks.locked && s.marks.locked[0] === c[0] && s.marks.locked[1] === c[1]);
-    if (d.visible) { d.position.set(cellX(c[0]), 0.03, cellZ(c[1])); d.material.opacity = 0.5 + Math.sin(T * 3 + i) * 0.12; }
-  });
-  if (s.marks.locked && s.phase === 'play' && (b.state === 'lock' || b.state === 'lunge')) {
-    lockDecal.visible = true; lockDecal.position.set(cellX(s.marks.locked[0]), 0.04, cellZ(s.marks.locked[1]));
-    lockDecal.scale.setScalar(1 + Math.sin(T * 14) * 0.12); lockDecal.rotation.z = Math.sin(T * 14) * 0.08;
-  } else lockDecal.visible = false;
-
-  // 落點預測（優先顯示已在敲擊範圍內的玩家）
-  const pr = s.preds.find((p) => p.ready) || s.preds[0];
-  const mouth = { x: b.x + b.mouthOff.x, y: b.y + b.mouthOff.y, z: b.z + b.mouthOff.z };
-  if (pr && b.state === 'stuck') {
-    const lx = cellX(pr.c), lz = cellZ(pr.r);
-    const top = platTopAt(pr.c, pr.r, s);
-    landDecal.visible = landArrow.visible = landLabel.visible = previewLine.visible = true;
-    const col = pr.inZone ? 0x7dff9a : pr.ok ? 0xffe14d : 0xff5555;
-    landDecal.material.color.setHex(col); landArrow.material.color.setHex(col);
-    landDecal.position.set(lx, (pr.ok ? top : -1.5) + 0.04, lz); landDecal.scale.setScalar(pr.ready ? 1 + Math.sin(T * 8) * 0.08 : 0.85);
-    landArrow.position.set(lx, (pr.ok ? top : -1.5) + 1.1 + Math.sin(T * 6) * 0.15, lz);
-    const want = pr.inZone ? '落點：斷橋 ✓' : pr.ok ? `落點（${LABEL[pr.side]} 敲）` : '落點：海裡 ✗';
-    if (landLabel.userData.text !== want) { markGroup.remove(landLabel); landLabel = textSprite(want, pr.inZone ? '#7dff9a' : pr.ok ? '#ffe14d' : '#ff6b6b'); landLabel.userData.text = want; markGroup.add(landLabel); }
-    landLabel.position.set(lx, (pr.ok ? top : -1.5) + 2.0, lz);
-    setArc(previewLine, mouth, { x: lx, y: pr.ok ? top : -1.5, z: lz }, 3);
-    previewLine.computeLineDistances();
-    previewLine.material.color.setHex(col);
-  } else { landDecal.visible = landArrow.visible = landLabel.visible = previewLine.visible = false; }
-
-  // 飛行中的磚
-  if (s.flight) {
-    const f = s.flight;
-    const p = Math.min(1, f.p + age / 1.1);
-    if (!flightBrick || flightBrick.userData.kind !== f.kind) { if (flightBrick) world.remove(flightBrick); flightBrick = (f.kind === 'spring' ? models.spring : models.tile).clone(); flightBrick.userData.kind = f.kind; world.add(flightBrick); }
-    const pos = arcPoint(f.from, f.to, p, 3);
-    flightBrick.position.set(pos.x, pos.y, pos.z); flightBrick.rotation.set(p * 6, p * 3, 0);
-    flightBrick.visible = true;
-    setArc(flightLine, f.from, f.to, 3); flightLine.visible = true;
-  } else { if (flightBrick) flightBrick.visible = false; flightLine.visible = false; }
-
-  // 弱點
-  if (b.state === 'open') {
-    weakSprite.visible = weakLabel.visible = true;
-    weakSprite.position.set(b.x + b.core.x, b.y + b.core.y, b.z + b.core.z + 0.2);
-    weakSprite.scale.setScalar(2.0 + Math.sin(T * 7) * 0.25); weakSprite.material.rotation = T * 1.5;
-    weakLabel.position.set(b.x + b.core.x, b.y + b.core.y + 1.9, b.z + b.core.z);
-  } else weakSprite.visible = weakLabel.visible = false;
-
-  // 能力區
-  for (const pd of padDecals) {
-    const info = s.pads.find((x) => x.kind === pd.kind);
-    pd.d.visible = pd.label.visible = !!info;
-    if (info) { pd.d.position.set(cellX(info.c), 0.03, cellZ(info.r)); pd.d.rotation.z = T * 0.6; pd.label.position.set(cellX(info.c), 1.5, cellZ(info.r)); }
-  }
-  // 斷橋格閃爍
-  for (const d of bridgeDecals) d.material.opacity = 0.5 + Math.sin(T * 2.5) * 0.25;
-  // 鬆動平台搖晃 / 新磚長出動畫
-  for (const m of platMeshes.values()) {
-    const age2 = (now - m.userData.born) / 1000;
-    const grow = Math.min(1, age2 / 0.3);
-    const wob = m.userData.loose && m.userData.remain < 8 ? Math.sin(T * 9) * 0.05 * (1 - m.userData.remain / 8) : 0;
-    m.rotation.z = wob; m.scale.setScalar(0.6 + 0.4 * grow);
-  }
-  for (const m of tileMeshes.values()) { const age2 = (now - m.userData.born) / 1000; if (age2 < 0.5) m.scale.setScalar(Math.min(1, age2 / 0.5)); else if (m.scale.x !== 1) m.scale.setScalar(1); }
+  for (const m of tileMeshes.values()) { const a2 = (now - m.userData.born) / 1000; if (a2 < 0.5) m.scale.setScalar(Math.min(1, a2 / 0.5)); else if (m.scale.x !== 1) m.scale.setScalar(1); }
   for (const m of ghostMeshes.values()) m.material.opacity = 0.15 + Math.sin(T * 4) * 0.08;
-  // 鐘
-  if (bellPivot) { bellSwing = Math.max(0, bellSwing - dt * 0.35); bellPivot.rotation.z = Math.sin(T * 12) * 0.5 * bellSwing; }
-
+  for (const d of spawnDecals) if (d.visible) { d.scale.setScalar(1 + Math.sin(T * 10) * 0.12); d.rotation.z = T * 2; }
   renderer.render(scene, camera);
 }
-function topAt(x, z, s) {
-  const c = Math.round(x / s.grid.s + s.grid.cx), r = Math.round(z / s.grid.s + s.grid.cz);
-  if (Math.hypot(x - s.tower.x, z - s.tower.z) <= s.tower.radius) return s.tower.top;
-  const p = s.plats.find((q) => q[0] === c && q[1] === r); if (p) return p[3];
-  return 0;
-}
-function platTopAt(c, r, s) { const p = s.plats.find((x) => x[0] === c && x[1] === r); if (p) return p[3]; return s.tiles.some((t) => t[0] === c && t[1] === r) ? s.grid.tileH : 0; }
-function arcPoint(a, b, t, h) { return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t + Math.sin(t * Math.PI) * h, z: a.z + (b.z - a.z) * t }; }
-function setArc(line, a, b, h) {
-  const pos = line.geometry.attributes.position;
-  for (let i = 0; i < pos.count; i++) { const q = arcPoint(a, b, i / (pos.count - 1), h); pos.setXYZ(i, q.x, q.y + 0.05, q.z); }
-  pos.needsUpdate = true; line.geometry.computeBoundingSphere();
-}
 function lerp(a, b, t) { return a + (b - a) * t; }
-function lerpAngle(a, b, t) { let d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return a + d * t; }
+function lerpAngle(a, b, t) { const d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI; return a + d * t; }
 
-// ---------- 鍵盤除錯 ----------
-const kbOn = { A: false, B: false };
+// ---------- 鍵盤除錯（最多 4 人） ----------
+const kbOn = { A: false, B: false, C: false, D: false };
 const keys = new Set();
 const KEYMAP = {
-  A: { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', hit: 'KeyE' },
-  B: { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', jump: 'Enter', hit: 'ShiftRight' },
+  A: { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space' },
+  B: { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', jump: 'Enter' },
+  C: { up: 'KeyI', down: 'KeyK', left: 'KeyJ', right: 'KeyL', jump: 'KeyU' },
+  D: { up: 'KeyT', down: 'KeyG', left: 'KeyF', right: 'KeyH', jump: 'KeyY' },
 };
-const lastKbSent = { A: { x: 9, y: 9 }, B: { x: 9, y: 9 } };
+const lastKbSent = { A: { x: 9, y: 9 }, B: { x: 9, y: 9 }, C: { x: 9, y: 9 }, D: { x: 9, y: 9 } };
+function ensureKb(side) { if (!kbOn[side] && !state?.players?.[side]?.connected) { kbOn[side] = true; ws.send({ type: 'kb', side, on: true }); } }
 addEventListener('keydown', (e) => {
-  if (e.repeat) { if (Object.values(KEYMAP).some((m) => Object.values(m).includes(e.code))) e.preventDefault(); return; }
-  if (e.code === 'Digit1' || e.code === 'Digit2') { const side = e.code === 'Digit1' ? 'A' : 'B'; kbOn[side] = !kbOn[side]; ws.send({ type: 'kb', side, on: kbOn[side] }); return; }
+  const mapped = Object.values(KEYMAP).some((m) => Object.values(m).includes(e.code));
+  if (e.repeat) { if (mapped) e.preventDefault(); return; }
+  if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) { const side = SIDES[Number(e.code.slice(-1)) - 1]; kbOn[side] = !kbOn[side]; ws.send({ type: 'kb', side, on: kbOn[side] }); return; }
   if (e.code === 'KeyR') { ws.send({ type: 'reset' }); return; }
-  if (e.code === 'Enter' && (state?.phase === 'win' || state?.phase === 'lose')) { ws.send({ type: 'restart' }); return; }
-  if (e.code === 'KeyB') { // 電腦搭檔：有就移除，沒有就加到空位
-    const botSide = ['A', 'B'].find((sd) => state?.players?.[sd]?.bot);
-    if (botSide) ws.send({ type: 'bot', side: botSide, on: false });
-    else { const free = ['A', 'B'].find((sd) => !state?.players?.[sd]?.connected); if (free) ws.send({ type: 'bot', side: free, on: true }); }
-    return;
+  if (e.code === 'KeyF' && !keys.size && !kbOn.D) { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); return; }
+  if (e.code === 'KeyE' || (e.code === 'Enter' && (state?.phase === 'win' || state?.phase === 'lose' || state?.phase === 'lobby'))) {
+    if (state?.phase === 'win' || state?.phase === 'lose') { ws.send({ type: 'restart' }); return; }
+    const side = SIDES.find((sd) => kbOn[sd]) || 'A'; ensureKb(side); ws.send({ type: 'input', side, act: 'hit' }); if (e.code === 'Enter') return;
   }
-  if (e.code === 'KeyF') { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); return; }
-  for (const side of ['A', 'B']) {
+  for (const side of SIDES) {
     const m = KEYMAP[side];
-    if (e.code === m.jump || e.code === m.hit) {
-      e.preventDefault();
-      if (!kbOn[side] && !state?.players?.[side]?.connected) { kbOn[side] = true; ws.send({ type: 'kb', side, on: true }); }
-      if (kbOn[side]) ws.send({ type: 'input', side, act: e.code === m.jump ? 'jump' : 'hit' });
-    }
-    if ([m.up, m.down, m.left, m.right].includes(e.code)) { e.preventDefault(); keys.add(e.code); if (!kbOn[side] && !state?.players?.[side]?.connected) { kbOn[side] = true; ws.send({ type: 'kb', side, on: true }); } }
+    if (e.code === m.jump) { e.preventDefault(); ensureKb(side); if (kbOn[side]) ws.send({ type: 'input', side, act: 'jump' }); }
+    if ([m.up, m.down, m.left, m.right].includes(e.code)) { e.preventDefault(); keys.add(e.code); ensureKb(side); }
   }
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
 setInterval(() => {
-  for (const side of ['A', 'B']) {
+  for (const side of SIDES) {
     if (!kbOn[side]) continue;
     const m = KEYMAP[side];
-    const x = (keys.has(m.right) ? 1 : 0) - (keys.has(m.left) ? 1 : 0);
-    const y = (keys.has(m.down) ? 1 : 0) - (keys.has(m.up) ? 1 : 0);
-    const last = lastKbSent[side];
-    if (x !== last.x || y !== last.y) { lastKbSent[side] = { x, y }; ws.send({ type: 'input', side, x, y }); }
+    const x = (keys.has(m.right) ? 1 : 0) - (keys.has(m.left) ? 1 : 0), y = (keys.has(m.down) ? 1 : 0) - (keys.has(m.up) ? 1 : 0);
+    const last = lastKbSent[side]; if (x !== last.x || y !== last.y) { lastKbSent[side] = { x, y }; ws.send({ type: 'input', side, x, y }); }
   }
 }, 50);
 
 // ---------- 啟動 ----------
 loadModels().then(() => {
-  resize();
-  if (state) onState(state);
+  resize(); if (state) onState(state);
   const missing = Object.entries(models.usingGlb).filter(([, ok]) => !ok).map(([k]) => k);
-  if (missing.length) console.info(`[島口大開] 找不到 GLB，使用程式替代模型：${missing.join(', ')}（放進 public/assets/island/ 即可自動載入）`);
+  if (missing.length) console.info(`[島口大開] 找不到 GLB，使用程式替代模型：${missing.join(', ')}`);
 });
 requestAnimationFrame(frame);
