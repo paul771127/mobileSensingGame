@@ -276,7 +276,7 @@ const tilesGroup = new THREE.Group(), platsGroup = new THREE.Group(), markGroup 
 world.add(tilesGroup, platsGroup, markGroup, ghostGroup);
 let bossObj = null, bossParts = {}, towerObj = null, bellPivot = null, heldBrick = null, flightBrick = null;
 const playerViews = {};
-let bridgeDecals = [], padDecals = [], lockDecal, candDecals = [], landDecal, landArrow, landLabel, weakSprite, weakLabel, previewLine, flightLine, bridgeLabel;
+let bridgeDecals = [], padDecals = [], lockDecal, goalViews = {}, candDecals = [], landDecal, landArrow, landLabel, weakSprite, weakLabel, previewLine, flightLine, bridgeLabel;
 let gridInfo = null;
 const cellX = (c) => (c - gridInfo.cx) * gridInfo.s, cellZ = (r) => (r - gridInfo.cz) * gridInfo.s;
 
@@ -326,6 +326,20 @@ function buildStatic(s) {
       parts: { armL: model.getObjectByName('Arm_L'), armR: model.getObjectByName('Arm_R'), legL: model.getObjectByName('Leg_L'), legR: model.getObjectByName('Leg_R') },
       pos: new THREE.Vector3(), phase: 0,
     };
+  }
+  // 每位玩家的目標光柱 / 箭頭 / 地面虛線
+  for (const side of ['A', 'B']) {
+    const g = new THREE.Group();
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.45, 7, 16, 1, true), new THREE.MeshBasicMaterial({ color: COLORS[side], transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    beam.position.y = 3.5; g.add(beam);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.75, 32), new THREE.MeshBasicMaterial({ color: COLORS[side], transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; g.add(ring);
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.35, 0.8, 6), new THREE.MeshBasicMaterial({ color: COLORS[side] })); arrow.rotation.x = Math.PI; arrow.position.y = 2.2; g.add(arrow);
+    const label = textSprite('', '#fff', side === 'A' ? 'rgba(58,160,255,.9)' : 'rgba(255,159,46,.9)', 0.8); label.position.y = 3.1; g.add(label);
+    g.visible = false; world.add(g);
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineDashedMaterial({ color: COLORS[side], dashSize: 0.3, gapSize: 0.2, transparent: true, opacity: 0.85 }));
+    line.visible = false; line.renderOrder = 7; world.add(line);
+    goalViews[side] = { g, beam, ring, arrow, label, line, text: '' };
   }
   // 鏡頭範圍
   const bz = s.boss.anchor.z - 2.4;
@@ -420,9 +434,20 @@ function updateHud(s) {
   $('players').innerHTML = cards.join('');
   const n = s.mode;
   $('joinLine').textContent = n === 0 ? '等待手機加入…（或按 1 / 2 用鍵盤試玩）' : s.bots ? '電腦搭檔就位：向前短推開始！' : n === 1 ? '1 位玩家已加入：向前短推開始單人模式、等第二位加入，或按 B 加電腦搭檔' : '2 位玩家都到了：任一人向前短推開始！';
-  // 底部提示
-  $('hintText').innerHTML = hintFor(s);
+  // 階段列
+  $('steps').classList.toggle('hidden', s.phase !== 'play');
+  for (const el of $('steps').children) { const n = Number(el.dataset.step); el.classList.toggle('on', n === s.step); el.classList.toggle('done', n < s.step); }
+  if (s.phase === 'play' && s.step !== lastStep) {
+    if (lastStep !== 0) { const el = [...$('steps').children].find((e) => Number(e.dataset.step) === s.step); const b2 = $('banner'); b2.textContent = `${el.querySelector('b').textContent}：${el.querySelector('small').textContent}`; b2.style.color = '#d9ff4a'; b2.classList.add('on'); bannerUntil = performance.now() + 3200; }
+    lastStep = s.step;
+  }
+  if (s.phase !== 'play') lastStep = 0;
+  // 底部：每位玩家一句「現在做什麼」+ 一行說明
+  const goals = [];
+  for (const side of ['A', 'B']) { const p = s.players[side]; if (p.connected && !p.bot && p.goal) goals.push(`<div class="goal ${side} ${p.goal.urgent ? 'urgent' : ''}">${side === 'A' ? '🔵' : '🟠'} ${esc(p.goal.text)}</div>`); }
+  $('hintText').innerHTML = goals.length ? goals.join('') + `<div class="ctx">${hintFor(s)}</div>` : hintFor(s);
 }
+let lastStep = 0;
 function hintFor(s) {
   if (s.phase === 'lobby') return '手機掃 QR code 加入 → 向前短推開始。一個人也能玩，兩個人更快。';
   if (s.phase === 'countdown') return '準備！傾斜走位、手腕短抬跳躍、向前短推敲擊';
@@ -507,6 +532,29 @@ function frame(now) {
       if (p.ability) { v.abil = textSprite(s.abilities[p.ability].name, '#fff', p.ability === 'boots' ? 'rgba(166,107,58,.9)' : 'rgba(53,208,224,.9)', 0.55); v.abil.position.y = 3.35; v.root.add(v.abil); }
     }
     if (s.marks.target === side && s.phase === 'play' && (s.boss.state === 'aim' || s.boss.state === 'lock')) v.marker.scale.setScalar(1.3 + Math.sin(T * 10) * 0.25); else v.marker.scale.setScalar(1);
+  }
+
+  // 目標光柱
+  for (const side of ['A', 'B']) {
+    const p = s.players[side], gv = goalViews[side], goal = p.goal;
+    const show = p.connected && !p.bot && !p.dead && goal && goal.x != null && s.phase === 'play';
+    gv.g.visible = gv.line.visible = !!show;
+    if (!show) continue;
+    const top = topAt(goal.x, goal.z, s);
+    gv.g.position.set(goal.x, top, goal.z);
+    const urgent = goal.urgent ? 1 : 0;
+    gv.arrow.position.y = 2.2 + Math.sin(T * (urgent ? 9 : 4)) * (0.2 + urgent * 0.15);
+    gv.arrow.rotation.y = T * 2;
+    gv.ring.scale.setScalar(1 + Math.sin(T * (urgent ? 8 : 3)) * 0.15);
+    gv.beam.material.opacity = goal.act ? 0.35 + Math.sin(T * 12) * 0.15 : 0.18 + urgent * 0.08;
+    const short = goal.act ? '敲！' : { flee: '走開！', lure: '站這裡', core: '核心', knock: '敲這裡', bell: '鐘', spring: '彈簧磚', 'wait-core': '在這等', prep: '預備位', pad: '能力區', idle: '待命', hold: '別動', wait: '' }[goal.kind] || '';
+    if (short !== gv.text) { gv.text = short; gv.g.remove(gv.label); gv.label = textSprite(`${LABEL[side]} ${short}`, '#fff', side === 'A' ? 'rgba(58,160,255,.9)' : 'rgba(255,159,46,.9)', 0.8); gv.label.position.y = 3.1; gv.g.add(gv.label); }
+    gv.label.visible = !!short;
+    const pv = playerViews[side];
+    const pos = gv.line.geometry.attributes.position;
+    pos.setXYZ(0, pv.pos.x, pv.pos.y + 0.1, pv.pos.z); pos.setXYZ(1, goal.x, top + 0.1, goal.z); pos.needsUpdate = true;
+    gv.line.computeLineDistances(); gv.line.geometry.computeBoundingSphere();
+    gv.line.visible = Math.hypot(goal.x - pv.pos.x, goal.z - pv.pos.z) > 1.2;
   }
 
   // 巨怪
@@ -602,6 +650,12 @@ function frame(now) {
   if (bellPivot) { bellSwing = Math.max(0, bellSwing - dt * 0.35); bellPivot.rotation.z = Math.sin(T * 12) * 0.5 * bellSwing; }
 
   renderer.render(scene, camera);
+}
+function topAt(x, z, s) {
+  const c = Math.round(x / s.grid.s + s.grid.cx), r = Math.round(z / s.grid.s + s.grid.cz);
+  if (Math.hypot(x - s.tower.x, z - s.tower.z) <= s.tower.radius) return s.tower.top;
+  const p = s.plats.find((q) => q[0] === c && q[1] === r); if (p) return p[3];
+  return 0;
 }
 function platTopAt(c, r, s) { const p = s.plats.find((x) => x[0] === c && x[1] === r); if (p) return p[3]; return s.tiles.some((t) => t[0] === c && t[1] === r) ? s.grid.tileH : 0; }
 function arcPoint(a, b, t, h) { return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t + Math.sin(t * Math.PI) * h, z: a.z + (b.z - a.z) * t }; }

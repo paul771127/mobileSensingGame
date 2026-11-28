@@ -83,6 +83,7 @@ export class IslandGame {
       hp: BOSS_MAX_HP, shieldOpenUntil: 0, pendingOpen: 0, stuckDur: 0, mouth: 0.2,
     };
     this.flight = null;
+    this.platZoneSince = 0;
     this.regrow = [];
     this.platforms = new Map();   // key -> { c, r, kind, top, loose, until }
   }
@@ -612,10 +613,13 @@ export class IslandGame {
       if (p.onTower) { if (this.inReach(p, bell, 2.5)) { stop(); if (this.now >= p.hitCd) p.hitReq = true; } else this.botMoveTo(p, TOWER.x, TOWER.z, true); return; }
       const px = cellX(springPlat.c), pz = cellZ(springPlat.r);
       const myD = Math.hypot(p.x - px, p.z - pz), hD = human ? Math.hypot(human.x - px, human.z - pz) : Infinity;
-      const iGo = !human || (!human.onTower && hD > myD + 1.0);
+      if (!this.platZoneSince) this.platZoneSince = this.now;
+      const humanStalled = this.now - this.platZoneSince > 6 && !human?.onTower && !human?.bounced && hD > 2.5; // 真人一直沒去踩：電腦自己去
+      const iGo = !human || (!human.onTower && !human.bounced && (hD > myD + 1.0 || humanStalled));
       if (iGo) { this.botMoveTo(p, px, pz, true); return; }
       this.botMoveTo(p, coreFront.x, coreFront.z, true); return;
     }
+    if (!platInZone) this.platZoneSince = 0;
     // 搭檔被盯：先到預計咬點的側邊待命
     if (b.target && b.target !== p.side && (b.state === 'aim' || b.state === 'lock' || b.state === 'lunge')) {
       let cell = b.locked;
@@ -733,6 +737,86 @@ export class IslandGame {
     p.input.x = dx / d * k; p.input.y = dz / d * k;
   }
 
+  // ---------- 玩家目標（畫面上的光柱 / 箭頭 / 一句話） ----------
+  // 回傳 { kind, x, z, text, urgent, act }：act = 'hit' 表示現在就該敲
+  goalFor(p) {
+    const b = this.boss;
+    const other = this.players[p.side === 'A' ? 'B' : 'A'];
+    const partner = other.connected && !other.dead ? other : null;
+    const partnerBot = partner && partner.bot;
+    if (this.phase !== 'play') return null;
+    if (p.dead) return { kind: 'wait', text: '掉下去了，馬上在安全磚復活' };
+    const [pc, pr] = toCell(p.x, p.z);
+    if (b.locked && (b.state === 'lock' || b.state === 'lunge') && b.locked[0] === pc && b.locked[1] === pr) {
+      const esc = this.botEscapeCell(pc, pr);
+      return { kind: 'flee', x: esc ? cellX(esc[0]) : p.x, z: esc ? cellZ(esc[1]) : p.z + S, text: '快走開！這塊磚要被咬了', urgent: true };
+    }
+    const core = this.corePos();
+    const coreSpot = this.botReachSpot(p, core, this.hitRange(p)) || { x: core.x, z: core.z + 1.0 };
+    if (b.state === 'open') {
+      if (this.inReach(p, core, 1.8)) return { kind: 'core', x: core.x, z: core.z, text: '敲核心！向前短推（連敲）', urgent: true, act: 'hit' };
+      return { kind: 'core', x: coreSpot.x, z: coreSpot.z, text: `去巨怪嘴前敲粉紅核心（剩 ${Math.ceil(b.shieldOpenUntil - this.now)} 秒）`, urgent: true };
+    }
+    if (b.state === 'stuck' && b.held) {
+      const m = this.mouthPos();
+      const spot = this.botHitSpot(p, m, b.held.kind === 'spring');
+      const pred = this.predictLanding(p);
+      if (this.inReach(p, m, 2.2) && pred.ok && (b.held.kind !== 'spring' || pred.inZone || !spot || !spot.inZone)) return { kind: 'knock', x: m.x, z: m.z, text: '敲它！向前短推，磚會飛向綠色落點', urgent: true, act: 'hit' };
+      if (spot) return { kind: 'knock', x: spot.x, z: spot.z, text: partnerBot ? '站到這裡敲巨怪（電腦也會幫忙）' : '站到這裡，從側邊敲巨怪', urgent: true };
+    }
+    const springTile = [...this.tiles.values()].find((t) => t.kind === 'spring');
+    const springPlat = [...this.platforms.values()].find((pl) => pl.kind === 'spring');
+    const platInZone = springPlat && this.bridge.some(([c, r]) => c === springPlat.c && r === springPlat.r);
+    if (b.target === p.side && (b.state === 'aim' || b.state === 'lock')) {
+      if (b.state === 'lock') return { kind: 'hold', x: p.x, z: p.z, text: '離紅色牙印遠一點，等它咬下去' };
+      if (springTile && !springPlat) {
+        const on = pc === springTile.c && pr === springTile.r;
+        return { kind: 'lure', x: cellX(springTile.c), z: cellZ(springTile.r), text: on ? '站好別動，紅色牙印出現就走開' : '巨怪盯上你了：去站金色彈簧磚', urgent: !on };
+      }
+      return { kind: 'hold', x: p.x, z: p.z, text: '巨怪盯上你了：站在磚上等，紅色牙印出現就走開' };
+    }
+    if (platInZone && !b.pendingOpen) {
+      const bell = this.bellPos();
+      if (p.onTower) return this.inReach(p, bell, 2.5) ? { kind: 'bell', x: bell.x, z: bell.z, text: '敲鐘！向前短推', urgent: true, act: 'hit' } : { kind: 'bell', x: TOWER.x, z: TOWER.z, text: '走到鐘下面敲鐘' };
+      const px = cellX(springPlat.c), pz = cellZ(springPlat.r);
+      const myD = Math.hypot(p.x - px, p.z - pz), oD = partner ? Math.hypot(partner.x - px, partner.z - pz) : Infinity;
+      const partnerGoing = partner && (partner.onTower || partner.bounced || oD + 1.0 < myD || (partnerBot && this.platZoneSince && this.now - this.platZoneSince > 6 && myD > 2.5));
+      if (!partnerGoing) return { kind: 'spring', x: px, z: pz, text: '踩金色彈簧磚彈起來，空中往鐘樓傾斜', urgent: true };
+      return { kind: 'wait-core', x: coreSpot.x, z: coreSpot.z, text: `搭檔去敲鐘，你先到巨怪嘴前等防護打開` };
+    }
+    if (b.target && b.target !== p.side && (b.state === 'aim' || b.state === 'lock' || b.state === 'lunge')) {
+      let cell = b.locked;
+      if (!cell && partner) { const [c, r] = toCell(partner.x, partner.z); cell = this.tiles.has(key(c, r)) ? [c, r] : (springTile ? [springTile.c, springTile.r] : null); }
+      if (cell) {
+        const spot = this.botHitSpot(p, { x: cellX(cell[0]), y: 0.4, z: cellZ(cell[1]) }, this.tiles.get(key(cell[0], cell[1]))?.kind === 'spring', cell);
+        if (spot) return { kind: 'prep', x: spot.x, z: spot.z, text: '搭檔在引怪：先站到這裡，等巨怪咬住就敲它' };
+      }
+    }
+    if (springPlat && !platInZone) {
+      const left = Math.max(0, springPlat.until - this.now);
+      return { kind: 'wait', x: coreSpot.x, z: coreSpot.z, text: `彈簧磚沒落在斷橋旁，${Math.ceil(left)} 秒後崩落長回原位；先避開巨怪` };
+    }
+    if (!springTile && !springPlat) {
+      const g = this.regrow.find((x) => x.kind === 'spring');
+      return { kind: 'wait', x: p.x, z: p.z, text: g ? `彈簧磚 ${Math.ceil(g.at - this.now)} 秒後長回，先避開巨怪` : '等彈簧磚長回' };
+    }
+    if (this.bellRungOnce && !p.ability) {
+      const pad = this.pads.find((x) => x.kind === 'hammer');
+      if (pad) return { kind: 'pad', x: cellX(pad.c), z: cellZ(pad.r), text: '空檔：站上能力區 1 秒選能力（可以不選）' };
+    }
+    if (springTile) return { kind: 'idle', x: cellX(springTile.c), z: cellZ(springTile.r) + S, text: '等巨怪盯人。盯上你就去站金色彈簧磚，盯上搭檔就到旁邊準備敲' };
+    return { kind: 'idle', x: p.x, z: p.z, text: '等巨怪盯人' };
+  }
+  // 整局進度：1 引怪咬磚 2 敲飛到斷橋 3 敲鐘 4 打核心
+  currentStep() {
+    const b = this.boss;
+    if (b.state === 'open') return 4;
+    const springPlat = [...this.platforms.values()].find((pl) => pl.kind === 'spring');
+    if (springPlat && this.bridge.some(([c, r]) => c === springPlat.c && r === springPlat.r)) return 3;
+    if ((b.state === 'stuck' && b.held?.kind === 'spring') || (this.flight && this.flight.kind === 'spring')) return 2;
+    return 1;
+  }
+
   // ---------- 事件 / 快照 ----------
   pushEvent(type, text, side = null, quiet = false) {
     const ev = { t: Math.round(this.now * 1000), type, text, side, quiet };
@@ -757,6 +841,7 @@ export class IslandGame {
         x: r3(p.x), y: r3(p.y), z: r3(p.z), vx: r3(p.vx), vz: r3(p.vz), vy: r3(p.vy), facing: r3(p.facing),
         grounded: p.grounded, dead: p.dead, respawnIn: p.dead ? Math.max(0, p.respawnAt - this.now) : 0,
         ability: p.ability, hitAge: r3(this.now - p.hitAt), onTower: p.onTower, pad: p.padKind, padT: p.padT ? r3(p.padT / PAD_TIME) : 0,
+        goal: p.connected && !p.bot ? this.goalFor(p) : null,
       };
     }
     let flight = null;
@@ -773,7 +858,7 @@ export class IslandGame {
         openRemain: b.state === 'open' ? r3(Math.max(0, b.shieldOpenUntil - this.now)) : 0, stuckRemain: b.state === 'stuck' ? r3(Math.max(0, b.until - this.now)) : 0,
         target: b.target, coreHitAge: b.coreHitT != null ? r3(this.now - b.coreHitT) : 99, anchor: BOSS_ANCHOR, core: CORE_OFFSET, mouthOff: MOUTH_OFFSET,
       },
-      flight, preds,
+      flight, preds, step: this.phase === 'play' ? this.currentStep() : 0,
       bridge: this.bridge, tower: { x: TOWER.x, z: TOWER.z, c: TOWER.c, r: TOWER.r, top: TOWER.top, radius: TOWER.radius, bellY: TOWER.top + 0.8 },
       pads: this.bellRungOnce ? this.pads : [], padsVisible: this.bellRungOnce,
       bell: { age: r3(this.now - this.bellRingT) },

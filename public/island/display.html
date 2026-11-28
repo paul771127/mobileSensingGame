@@ -30,8 +30,21 @@
   .pcard.off { opacity: .45; }
   #banner { left: 0; right: 0; top: 18%; text-align: center; font-size: 34px; font-weight: 900; text-shadow: 0 3px 16px rgba(0,0,0,.7); opacity: 0; transition: opacity .15s; }
   #banner.on { opacity: 1; }
-  #hint { left: 0; right: 0; bottom: 48px; text-align: center; font-size: 20px; font-weight: 700; }
-  #hint span { display: inline-block; background: rgba(10,16,38,.72); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 10px 20px; }
+  #hint { left: 0; right: 0; bottom: 44px; text-align: center; font-size: 20px; font-weight: 700; }
+  #hint span { display: inline-block; background: rgba(10,16,38,.78); border: 1px solid rgba(255,255,255,.12); border-radius: 16px; padding: 10px 22px; max-width: 92vw; }
+  .goal { font-size: 26px; font-weight: 900; line-height: 1.3; }
+  .goal.A { color: var(--blue); } .goal.B { color: var(--orange); }
+  .goal.urgent { animation: pulse .6s ease-in-out infinite alternate; }
+  @keyframes pulse { from { opacity: .75; } to { opacity: 1; } }
+  .ctx { font-size: 14px; color: var(--muted); font-weight: 500; margin-top: 4px; }
+  #steps { top: 78px; left: 0; right: 0; display: flex; justify-content: center; gap: 8px; }
+  .step { background: rgba(10,16,38,.72); border: 1px solid rgba(255,255,255,.12); border-radius: 12px; padding: 6px 12px; font-size: 13px; color: var(--muted); max-width: 230px; }
+  .step b { display: block; font-size: 15px; color: var(--text); }
+  .step small { display: none; line-height: 1.35; }
+  .step.on { border-color: var(--accent); background: rgba(217,255,74,.12); color: var(--text); }
+  .step.on b { color: var(--accent); }
+  .step.on small { display: block; margin-top: 2px; }
+  .step.done { opacity: .55; }
   #keys { left: 14px; bottom: 10px; font-size: 12px; color: var(--muted); opacity: .85; }
   #countdown { inset: 0; display: grid; place-items: center; font-size: 160px; font-weight: 900; text-shadow: 0 8px 30px rgba(0,0,0,.7); }
   #lobby { inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; background: radial-gradient(ellipse at center, rgba(10,16,38,.25), rgba(10,16,38,.85)); }
@@ -70,6 +83,12 @@
   <div><div class="code" id="roomCode">----</div><div class="muted" id="roomHint">手機掃碼加入，隨時可以中途加入</div></div>
 </div>
 <div id="hosts" class="hud"></div>
+<div id="steps" class="hud hidden">
+  <div class="step" data-step="1"><b>① 引怪咬磚</b><small>被盯上的人站上金色彈簧磚，紅色牙印出現就走開，讓巨怪咬走它</small></div>
+  <div class="step" data-step="2"><b>② 敲飛到斷橋</b><small>巨怪卡住時站到它側邊，黃色落點變綠就向前短推，磚飛到斷橋旁</small></div>
+  <div class="step" data-step="3"><b>③ 彈上鐘樓敲鐘</b><small>踩落地的彈簧磚彈起，空中往鐘樓傾斜，落在平台上向前短推敲鐘</small></div>
+  <div class="step" data-step="4"><b>④ 打核心 ×5</b><small>防護打開時到巨怪嘴前，對粉紅核心連續向前短推；敲滿 5 下獲勝</small></div>
+</div>
 <div id="players" class="hud"></div>
 <div id="banner" class="hud"></div>
 <div id="hint" class="hud"><span id="hintText"></span></div>
@@ -83,9 +102,10 @@
   <div class="url" id="qrUrl"></div>
   <div class="joinline" id="joinLine">等待手機加入…</div>
   <div class="steps">
-    <div><b>①</b>巨怪盯上你時，站上<b style="font-size:14px;display:inline">金色彈簧磚</b>，看到紅色咬痕鎖定就跳開</div>
-    <div><b>②</b>巨怪咬住卡住時，搭檔站在它<b style="font-size:14px;display:inline">側邊敲擊</b>，磚會飛到黃色落點——對準斷橋虛線格</div>
-    <div><b>③</b>踩落地的彈簧磚彈上鐘樓敲鐘，防護打開時兩人一起<b style="font-size:14px;display:inline">打核心</b></div>
+    <div><b>①</b>巨怪盯上你時，去站<b style="font-size:14px;display:inline">金色彈簧磚</b>；紅色牙印出現就走開，讓它咬走那塊磚</div>
+    <div><b>②</b>巨怪咬住會卡住：站到它<b style="font-size:14px;display:inline">側邊</b>，黃色落點變綠就敲，磚飛到斷橋旁</div>
+    <div><b>③</b>踩那塊彈簧磚<b style="font-size:14px;display:inline">彈上鐘樓敲鐘</b>，巨怪防護打開</div>
+    <div><b>④</b>到巨怪嘴前對<b style="font-size:14px;display:inline">粉紅核心</b>連敲 5 下就贏。遊戲中跟著你顏色的光柱走就對了</div>
   </div>
   <div class="muted" style="font-size:13px">只有一個人？手機上按「讓電腦當搭檔」或鍵盤按 B。</div>
   <div class="muted" style="font-size:13px">手機：傾斜走位 ・ 手腕短抬跳躍 ・ 向前短推敲擊 ・ 加入後<b>向前短推</b>開始</div>
