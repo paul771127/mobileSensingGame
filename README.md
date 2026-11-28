@@ -153,7 +153,7 @@ npm start
 手勢判定（`public/island/controller.js`）：去重力加速度轉到世界座標，超過門檻進入「爆發」，累積加速階段的向量，
 峰值一過就分類——**向上分量占優**為跳躍、**沿手機前方的水平分量占優**為敲擊，其餘忽略；跳躍 450 ms、
 敲擊 350 ms 冷卻，任一手勢後 250 ms 內互斥，手勢期間姿態傾斜不更新走位。門檻與相互誤觸請在實機上
-用畫面左下的除錯數值（`up / fwd / lat`）調整。iPhone 一樣需要 HTTPS（見上方 mkcert 說明）。
+用畫面左下的除錯數值（`up / fwd / lat`）調整。**手機必須用 HTTPS 連線**，iPhone Safari 與 Android Chrome 在 HTTP 下都不給感測器資料（見上方 mkcert 說明）。
 
 ## 美術模型
 

@@ -143,8 +143,10 @@ function onOrientation(e) {
   if (e.alpha == null || e.beta == null || e.gamma == null) return;
   const m = rotMatrix(e.alpha, e.beta, e.gamma);
   orient = m;
-  // 長軸 (0,1,0) 的世界上分量 = 仰角；短軸 (1,0,0) 的世界上分量 = 右側抬高
-  pitchDeg = Math.asin(clamp(m.m32, -1, 1)) / DEG;
+  // 仰角：長軸 (0,1,0) 與螢幕法線 (0,0,1) 的世界上分量用 atan2 合成，平放 0°、直立 90°、
+  // 再往自己壓會繼續到 90° 以上（用 asin 會在 90° 折返，往後傾就變成往前）
+  pitchDeg = Math.atan2(m.m32, m.m33) / DEG;
+  // 左右傾：短軸 (1,0,0) 的世界上分量 = 右側抬高
   rollDeg = Math.asin(clamp(m.m31, -1, 1)) / DEG;
   updateMove();
 }
@@ -277,6 +279,8 @@ $('flipX').onclick = () => { flipX = !flipX; $('flipX').textContent = `左右反
 $('vib').onclick = () => { vibrate = !vibrate; $('vib').textContent = `震動：${vibrate ? '開' : '關'}`; };
 
 function updateDebug() {
+  if (joined && !orient) { $('gest').textContent = '⚠ 沒有姿態資料：請確認是 https 連線並允許感測器'; $('gest').style.color = '#ff6b6b'; }
+  else if (!gestFlashing && $('gest').style.color) { $('gest').textContent = ''; $('gest').style.color = ''; }
   $('debug').textContent = `acc ${debugAcc.toFixed(1)}  sign ${accSignLocked ? (accSign > 0 ? '+' : '-') : '?'}  th ${SENS[sensIdx].th}\npitch ${(pitchDeg - basePitch).toFixed(0)}° roll ${(rollDeg - baseRoll).toFixed(0)}°  move ${moveX.toFixed(2)},${moveY.toFixed(2)}\n${lastClass}`;
 }
 setInterval(updateDebug, 150);
