@@ -8,7 +8,7 @@
 <style>
   :root { --blue: #3aa0ff; --orange: #ff9f2e; --hp: #ff4f7a; }
   html, body { overflow: hidden; background: #0a1430; }
-  #gl { position: fixed; inset: 0; display: block; }
+  #gl { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; } /* 固定 CSS 尺寸：高 DPR 螢幕下 canvas 緩衝比視窗大，不設就只看得到左上角 */
   .hud { position: fixed; pointer-events: none; font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif; }
   #topbar { top: 14px; left: 0; right: 0; display: flex; justify-content: center; gap: 28px; align-items: center; }
   .pill { background: rgba(10,16,38,.72); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 8px 16px; backdrop-filter: blur(6px); }

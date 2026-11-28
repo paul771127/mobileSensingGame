@@ -164,15 +164,16 @@ npm start
 
 ## 美術模型
 
-模型放在 `public/assets/island/`（glTF Y-up，角色與巨怪面向 +Z），**缺檔時程式會自動用同名節點的替代模型**，
-所以沒有 GLB 也能跑，放進去就會自動載入：
+模型放在 `public/assets/island/`（glTF Y-up，角色與巨怪面向 +Z，交接文件見 `docs/ISLAND_HANDOFF.md`），
+顯示端啟動時載入，**缺檔時自動退回程式建立的同名節點替代模型**。各模型的接法與對應的遊戲常數：
 
-| 檔案 | 程式接法 |
+| 檔案 | 接法 |
 |---|---|
-| `repairer-blue.glb`、`repairer-orange.glb` | 原點在腳下；旋轉 `Arm_L`、`Arm_R`、`Leg_L`、`Leg_R` 做跑跳與敲擊（右臂帶槌） |
-| `chomp-boss.glb` | 根節點 `Boss`；`UpperJaw` / `Jaw` 張嘴與卡住；咬住的磚掛在 `BrickSocket`；`Core` 只在防護打開時可見 |
-| `ground-tile.glb`、`spring-tile.glb` | 1.5 間距排格，原點在可站立的頂面 |
-| `bell-tower.glb` | 原點在底部；`BellPivot` 做敲鐘擺動。可站平台（高 3.2、半徑 1.35）由 `server/island.js` 的 `TOWER` 定義 |
+| `repairer-blue.glb`、`repairer-orange.glb` | 原點在腳下、高 1.10；顯示端放大 1.25 倍。`Arm_L` / `Arm_R` / `Leg_L` / `Leg_R` 繞 X 軸做跑跳；敲擊時右臂先往後上舉再往前下揮（槌子朝 +Z）。頭頂標記高度依模型包圍盒自動算 |
+| `chomp-boss.glb` | 根節點 `Boss`，寬 2.7、高 2.7、牙齒前緣 z+1.23。`UpperJaw` 繞 X 負向抬、`Jaw` 正向張；卡住時半開。`BrickSocket` (0, 0.95, 1.05) 掛被咬的磚（縮 0.85、上翹 0.6 rad）；`Core` 只在防護打開時可見並脈動發光。伺服器的 `MOUTH_OFFSET` / `CORE_OFFSET` / `BOSS_ANCHOR` 依這些節點位置設定 |
+| `ground-tile.glb`、`spring-tile.glb` | 寬 1.44、厚 0.5、原點在頂面；1.5 間距排格，疊上去的平台高 0.5（`TILE_H`） |
+| `bell-tower.glb` | 落地涼亭（高 1.92、底座頂 0.2）。顯示端把它放大 1.2 倍架在程式畫的石柱平台上，底座頂面對齊可站高度 `TOWER.top = 3.2`、平台半徑 1.35；`BellPivot` 繞 Z 擺動做敲鐘 |
+| `art-preview.png` | 鏡頭約 45° 俯角略偏右（保留「畫面上方 = 巨怪方向」的操作對應）、鋼藍底色、水面深色石頭 |
 
 Three.js 由伺服器從 `node_modules/three` 以 `/vendor/three/…` 提供，區網沒有對外網路也能用。
 

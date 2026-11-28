@@ -24,6 +24,7 @@ function onMessage(msg) {
     loadQr(); buildHostPicker();
   } else if (msg.type === 'state') {
     prevState = state; state = msg.state; stateAt = performance.now();
+    window.__islandState = state; // 給自動化測試讀取
     onState(state);
   }
 }
@@ -64,24 +65,30 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a1430);
-scene.fog = new THREE.Fog(0x0a1430, 38, 70);
-const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
-const CAM_DIR = new THREE.Vector3(0.05, 1.0, 0.8).normalize();
+const BG = 0x5a7a92; // art-preview 的鋼藍底色
+scene.background = new THREE.Color(BG);
+scene.fog = new THREE.Fog(BG, 40, 75);
+const camera = new THREE.PerspectiveCamera(36, 1, 0.5, 200);
+const CAM_DIR = new THREE.Vector3(0.22, 0.86, 0.86).normalize(); // 約 45° 俯角、略偏右，保留「畫面上 = 巨怪方向」
 
-scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x3a2a1a, 0.9));
-const sun = new THREE.DirectionalLight(0xfff1dc, 1.6);
-sun.position.set(-8, 18, 10); sun.castShadow = true;
+scene.add(new THREE.HemisphereLight(0xe6f0f7, 0x3a5a4a, 1.1));
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.5);
+sun.position.set(-10, 16, 9); sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1; sun.shadow.camera.far = 60;
 sun.shadow.camera.left = -18; sun.shadow.camera.right = 18; sun.shadow.camera.top = 16; sun.shadow.camera.bottom = -16;
 sun.shadow.bias = -0.0005;
 scene.add(sun); scene.add(sun.target);
-const fill = new THREE.DirectionalLight(0x9fc3ff, 0.35); fill.position.set(10, 6, -8); scene.add(fill);
+const fill = new THREE.DirectionalLight(0xbfd8ee, 0.4); fill.position.set(10, 6, -8); scene.add(fill);
 
-// 海面
-const sea = new THREE.Mesh(new THREE.PlaneGeometry(200, 200, 1, 1), new THREE.MeshStandardMaterial({ color: 0x173d80, roughness: 0.6, metalness: 0.1 }));
+// 海面（與背景同色系，只為承接陰影）
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(200, 200, 1, 1), new THREE.MeshStandardMaterial({ color: 0x54748c, roughness: 0.9, metalness: 0 }));
 sea.rotation.x = -Math.PI / 2; sea.position.y = -2.2; sea.receiveShadow = true; scene.add(sea);
+// 水面的深色石頭（art-preview 的點綴）
+const ROCK_MAT = new THREE.MeshStandardMaterial({ color: 0x0b2238, roughness: 0.95, flatShading: true });
+for (const [x, z, r] of [[-10, -5, 0.9], [-10.5, 4, 0.6], [14.5, 4.5, 0.8], [13.5, -6, 0.55], [5, 9, 0.6], [-5, 8.5, 0.45], [16, -1, 0.5]]) {
+  const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), ROCK_MAT); rock.position.set(x, -2.2 + r * 0.25, z); rock.scale.y = 0.65; rock.rotation.set(0.3, x * 0.7, 0); rock.castShadow = rock.receiveShadow = true; scene.add(rock);
+}
 
 // 固定斜俯視：把整座島（含巨怪與鐘樓）收進畫面
 let worldBounds = null;
@@ -282,13 +289,21 @@ const cellX = (c) => (c - gridInfo.cx) * gridInfo.s, cellZ = (r) => (r - gridInf
 
 function buildStatic(s) {
   gridInfo = s.grid;
-  // 鐘樓
-  towerObj = models.tower.clone(); towerObj.position.set(s.tower.x, 0, s.tower.z); world.add(towerObj);
+  // 鐘樓：bell-tower.glb 是落地涼亭（高 1.92、底座頂 0.2），放在石柱平台上，底座頂面對齊可站高度 s.tower.top
+  towerObj = new THREE.Group(); towerObj.position.set(s.tower.x, 0, s.tower.z); world.add(towerObj);
+  if (models.usingGlb.tower) {
+    const GAZ_SCALE = 1.2, PLINTH_TOP = 0.2 * GAZ_SCALE;
+    const stone = mat(0x113a4c, { flatShading: true }), teal = mat(0x0a5663);
+    const pillar = cyl(0.95, 1.25, s.tower.top + 2.2, stone, 0, (s.tower.top - 2.2) / 2 - 0.3, 0, 10); pillar.receiveShadow = true; towerObj.add(pillar);
+    const disc = cyl(s.tower.radius, s.tower.radius + 0.1, 0.36, teal, 0, s.tower.top - 0.18, 0, 28); towerObj.add(disc);
+    const gaz = models.tower.clone(); gaz.scale.setScalar(GAZ_SCALE); gaz.position.y = s.tower.top - PLINTH_TOP; towerObj.add(gaz);
+  } else towerObj.add(models.tower.clone());
   bellPivot = towerObj.getObjectByName('BellPivot');
   // 巨怪
   bossObj = models.boss.clone(); world.add(bossObj);
   bossParts = { upper: bossObj.getObjectByName('UpperJaw'), jaw: bossObj.getObjectByName('Jaw'), socket: bossObj.getObjectByName('BrickSocket'), core: bossObj.getObjectByName('Core') };
-  if (bossParts.core) bossParts.core.visible = false;
+  if (bossParts.core) { bossParts.core.visible = false; if (bossParts.core.material) { bossParts.core.material = bossParts.core.material.clone(); bossParts.core.material.emissive = new THREE.Color(0xff2a3a); bossParts.core.material.emissiveIntensity = 1.2; } }
+  bossObj.traverse((o) => { if (o.isMesh && o.material?.name === 'gold_glow') { o.material = o.material.clone(); o.material.emissiveIntensity = 1.5; } });
   // 斷橋目標格
   for (const [c, r] of s.bridge) { const d = decal(dashTex, 0x35d0e0, 1.44, 0.75); d.position.set(cellX(c), 0.02, cellZ(r)); markGroup.add(d); bridgeDecals.push(d); }
   const mid = s.bridge[Math.floor(s.bridge.length / 2)];
@@ -301,7 +316,7 @@ function buildStatic(s) {
   }
   // 標記
   lockDecal = decal(biteTex, 0xff3b3b, 1.6, 0.95); lockDecal.visible = false; markGroup.add(lockDecal);
-  for (let i = 0; i < 9; i++) { const d = decal(biteTex, 0xffffff, 1.3, 0.4); d.visible = false; markGroup.add(d); candDecals.push(d); }
+  for (let i = 0; i < 9; i++) { const d = decal(biteTex, 0x0b2238, 1.3, 0.55); d.visible = false; markGroup.add(d); candDecals.push(d); }
   landDecal = decal(targetTex, 0xffe14d, 1.5, 1); landDecal.visible = false; markGroup.add(landDecal);
   landArrow = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 6), new THREE.MeshBasicMaterial({ color: 0xffe14d })); landArrow.rotation.x = Math.PI; landArrow.visible = false; markGroup.add(landArrow);
   landLabel = textSprite('落點', '#ffe14d'); landLabel.visible = false; markGroup.add(landLabel);
@@ -314,15 +329,18 @@ function buildStatic(s) {
   // 玩家
   for (const side of ['A', 'B']) {
     const root = new THREE.Group();
-    const model = models[side].clone(); root.add(model);
-    const marker = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.45, 5), new THREE.MeshBasicMaterial({ color: COLORS[side] })); marker.rotation.x = Math.PI; marker.position.y = 2.25; root.add(marker);
-    const label = textSprite(`${side === 'A' ? '1P' : '2P'} ${LABEL[side]}`, '#fff', side === 'A' ? 'rgba(58,160,255,.85)' : 'rgba(255,159,46,.85)', 0.7); label.position.y = 2.85; root.add(label);
-    const abil = textSprite('', '#fff', 'rgba(0,0,0,0)', 0.6); abil.position.y = 3.35; abil.visible = false; root.add(abil);
+    const model = models[side].clone();
+    if (models.usingGlb[side]) model.scale.setScalar(1.25); // repairer 高 1.1，放大一點在大螢幕上好辨認（仍小於一格地磚）
+    root.add(model);
+    const h = new THREE.Box3().setFromObject(model).max.y; // 模型頂（頭盔）
+    const marker = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.45, 5), new THREE.MeshBasicMaterial({ color: COLORS[side] })); marker.rotation.x = Math.PI; marker.position.y = h + 0.55; root.add(marker);
+    const label = textSprite(`${side === 'A' ? '1P' : '2P'} ${LABEL[side]}`, '#fff', side === 'A' ? 'rgba(58,160,255,.85)' : 'rgba(255,159,46,.85)', 0.7); label.position.y = h + 1.15; root.add(label);
+    const abil = textSprite('', '#fff', 'rgba(0,0,0,0)', 0.6); abil.position.y = h + 1.65; abil.visible = false; root.add(abil);
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.6, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false })); ring.rotation.x = -Math.PI / 2; ring.visible = false; root.add(ring);
     const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.42, 20), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false })); shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.015; root.add(shadow);
     root.visible = false; world.add(root);
     playerViews[side] = {
-      root, model, marker, label, abil, ring, shadow, abilKind: null,
+      root, model, marker, label, abil, ring, shadow, abilKind: null, h,
       parts: { armL: model.getObjectByName('Arm_L'), armR: model.getObjectByName('Arm_R'), legL: model.getObjectByName('Leg_L'), legR: model.getObjectByName('Leg_R') },
       pos: new THREE.Vector3(), phase: 0,
     };
@@ -330,7 +348,7 @@ function buildStatic(s) {
   // 每位玩家的目標光柱 / 箭頭 / 地面虛線
   for (const side of ['A', 'B']) {
     const g = new THREE.Group();
-    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.45, 7, 16, 1, true), new THREE.MeshBasicMaterial({ color: COLORS[side], transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 6, 16, 1, true), new THREE.MeshBasicMaterial({ color: COLORS[side], transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false }));
     beam.position.y = 3.5; g.add(beam);
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.75, 32), new THREE.MeshBasicMaterial({ color: COLORS[side], transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
     ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; g.add(ring);
@@ -517,19 +535,19 @@ function frame(now) {
     if (armR) {
       const h = p.hitAge;
       let target = p.grounded ? Math.sin(v.phase) * 0.75 * run : -1.2;
-      if (h < 0.1) target = -2.3;
-      else if (h < 0.35) target = lerp(-2.3, 1.1, (h - 0.1) / 0.25);
-      else if (h < 0.6) target = lerp(1.1, target, (h - 0.35) / 0.25);
+      if (h < 0.1) target = 2.4;
+      else if (h < 0.35) target = lerp(2.4, -1.3, (h - 0.1) / 0.25);
+      else if (h < 0.6) target = lerp(-1.3, target, (h - 0.35) / 0.25);
       armR.rotation.x = lerp(armR.rotation.x, target, h < 0.6 ? 0.6 : k);
     }
-    v.marker.position.y = 2.25 + Math.sin(T * 4 + (side === 'A' ? 0 : 1)) * 0.08;
+    v.marker.position.y = v.h + 0.55 + Math.sin(T * 4 + (side === 'A' ? 0 : 1)) * 0.08;
     v.marker.rotation.y = T * 2;
     v.ring.visible = p.hitAge < 0.3; if (v.ring.visible) { const q = p.hitAge / 0.3; v.ring.scale.setScalar(0.6 + q * 1.4 * (p.ability === 'hammer' ? 1.6 : 1)); v.ring.material.opacity = 0.8 * (1 - q); }
     v.shadow.position.y = -p.y + 0.015;
     v.shadow.visible = p.y > -1;
     if (p.ability !== v.abilKind) {
       v.abilKind = p.ability; v.root.remove(v.abil);
-      if (p.ability) { v.abil = textSprite(s.abilities[p.ability].name, '#fff', p.ability === 'boots' ? 'rgba(166,107,58,.9)' : 'rgba(53,208,224,.9)', 0.55); v.abil.position.y = 3.35; v.root.add(v.abil); }
+      if (p.ability) { v.abil = textSprite(s.abilities[p.ability].name, '#fff', p.ability === 'boots' ? 'rgba(166,107,58,.9)' : 'rgba(53,208,224,.9)', 0.55); v.abil.position.y = v.h + 1.65; v.root.add(v.abil); }
     }
     if (s.marks.target === side && s.phase === 'play' && (s.boss.state === 'aim' || s.boss.state === 'lock')) v.marker.scale.setScalar(1.3 + Math.sin(T * 10) * 0.25); else v.marker.scale.setScalar(1);
   }
@@ -546,7 +564,7 @@ function frame(now) {
     gv.arrow.position.y = 2.2 + Math.sin(T * (urgent ? 9 : 4)) * (0.2 + urgent * 0.15);
     gv.arrow.rotation.y = T * 2;
     gv.ring.scale.setScalar(1 + Math.sin(T * (urgent ? 8 : 3)) * 0.15);
-    gv.beam.material.opacity = goal.act ? 0.35 + Math.sin(T * 12) * 0.15 : 0.18 + urgent * 0.08;
+    gv.beam.material.opacity = goal.act ? 0.45 + Math.sin(T * 12) * 0.15 : 0.26 + urgent * 0.1;
     const short = goal.act ? '敲！' : { flee: '走開！', lure: '站這裡', core: '核心', knock: '敲這裡', bell: '鐘', spring: '彈簧磚', 'wait-core': '在這等', prep: '預備位', pad: '能力區', idle: '待命', hold: '別動', wait: '' }[goal.kind] || '';
     if (short !== gv.text) { gv.text = short; gv.g.remove(gv.label); gv.label = textSprite(`${LABEL[side]} ${short}`, '#fff', side === 'A' ? 'rgba(58,160,255,.9)' : 'rgba(255,159,46,.9)', 0.8); gv.label.position.y = 3.1; gv.g.add(gv.label); }
     gv.label.visible = !!short;
@@ -563,19 +581,27 @@ function frame(now) {
   bossObj.position.lerp(tmpV, 1 - Math.exp(-dt * 14));
   if (b.state === 'stuck') { bossObj.position.x += (Math.random() - 0.5) * 0.08; bossObj.position.y += (Math.random() - 0.5) * 0.05; }
   if (b.state === 'recoil') bossObj.position.x += Math.sin(T * 30) * 0.05;
-  const open = b.state === 'stuck' ? 0.08 : b.mouth;
-  if (bossParts.upper) bossParts.upper.rotation.x = lerp(bossParts.upper.rotation.x, -open * 0.5, 1 - Math.exp(-dt * 10));
-  if (bossParts.jaw) bossParts.jaw.rotation.x = lerp(bossParts.jaw.rotation.x, open * 0.65, 1 - Math.exp(-dt * 10));
+  // 卡住時嘴巴咬著磚半開；張嘴（瞄準 / 防護打開）上顎抬、下顎落
+  const open = b.state === 'stuck' ? 0.8 : b.mouth; // 卡住時嘴巴被磚撐開
+  if (bossParts.upper) bossParts.upper.rotation.x = lerp(bossParts.upper.rotation.x, -open * 0.38, 1 - Math.exp(-dt * 10));
+  if (bossParts.jaw) bossParts.jaw.rotation.x = lerp(bossParts.jaw.rotation.x, open * 0.6, 1 - Math.exp(-dt * 10));
   if (bossParts.core) {
     bossParts.core.visible = b.state === 'open';
+    if (!bossParts.core.userData.baseScale) bossParts.core.userData.baseScale = bossParts.core.scale.clone();
     const pulse = 1 + Math.sin(T * 8) * 0.12 + (b.coreHitAge < 0.25 ? 0.6 * (1 - b.coreHitAge / 0.25) : 0);
-    bossParts.core.scale.setScalar(pulse);
-    if (bossParts.core.material?.emissiveIntensity != null) bossParts.core.material.emissiveIntensity = 0.9 + Math.sin(T * 8) * 0.5;
+    bossParts.core.scale.copy(bossParts.core.userData.baseScale).multiplyScalar(pulse);
+    const cm = bossParts.core.material;
+    if (cm && cm.emissiveIntensity != null) cm.emissiveIntensity = 1.2 + Math.sin(T * 8) * 0.6;
   }
   bossObj.rotation.y = 0; bossObj.rotation.z = b.state === 'rest' || b.state === 'aim' ? Math.sin(T * 1.5) * 0.03 : 0;
   // 嘴裡的磚
   if (bossParts.socket) {
-    if (b.held && (!heldBrick || heldBrick.userData.kind !== b.held)) { if (heldBrick) bossParts.socket.remove(heldBrick); heldBrick = (b.held === 'spring' ? models.spring : models.tile).clone(); heldBrick.userData.kind = b.held; heldBrick.scale.setScalar(0.8); heldBrick.position.y = -0.1; bossParts.socket.add(heldBrick); }
+    if (b.held && (!heldBrick || heldBrick.userData.kind !== b.held)) {
+      if (heldBrick) bossParts.socket.remove(heldBrick);
+      heldBrick = (b.held === 'spring' ? models.spring : models.tile).clone(); heldBrick.userData.kind = b.held;
+      heldBrick.scale.setScalar(0.95); heldBrick.position.set(0, 0.25, 0.45); heldBrick.rotation.set(0.95, 0, 0.1); // 像 art-preview 那樣斜咬在嘴裡、露出牙齒外、磚面朝鏡頭
+      bossParts.socket.add(heldBrick);
+    }
     if (!b.held && heldBrick) { bossParts.socket.remove(heldBrick); heldBrick = null; }
   }
 
@@ -584,7 +610,7 @@ function frame(now) {
   candDecals.forEach((d, i) => {
     const c = cands[i];
     d.visible = !!c && !(s.marks.locked && s.marks.locked[0] === c[0] && s.marks.locked[1] === c[1]);
-    if (d.visible) { d.position.set(cellX(c[0]), 0.03, cellZ(c[1])); d.material.opacity = 0.35 + Math.sin(T * 3 + i) * 0.1; }
+    if (d.visible) { d.position.set(cellX(c[0]), 0.03, cellZ(c[1])); d.material.opacity = 0.5 + Math.sin(T * 3 + i) * 0.12; }
   });
   if (s.marks.locked && s.phase === 'play' && (b.state === 'lock' || b.state === 'lunge')) {
     lockDecal.visible = true; lockDecal.position.set(cellX(s.marks.locked[0]), 0.04, cellZ(s.marks.locked[1]));

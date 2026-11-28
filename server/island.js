@@ -45,9 +45,10 @@ const PAD_TIME = 1.0;
 const TOWER = { c: 11, r: 3, top: 3.2, radius: 1.35 };
 TOWER.x = cellX(TOWER.c); TOWER.z = cellZ(TOWER.r);
 const BELL_OFFSET = { x: 0, y: 4.0, z: 0 };
-const BOSS_ANCHOR = { x: 0, y: 0, z: cellZ(0) - 2.6 };
-const CORE_OFFSET = { x: 0, y: 1.1, z: 1.6 };   // 相對 Boss 根節點（面向 +Z）
-const MOUTH_OFFSET = { x: 0, y: 1.0, z: 1.3 };  // 嘴裡磚的位置（相對 Boss 根節點）
+// 巨怪站位與偏移依 chomp-boss.glb：牙齒前緣 z+1.23、BrickSocket (0,0.95,1.05)、Core (0,1.0,0.77)
+const BOSS_ANCHOR = { x: 0, y: 0, z: cellZ(0) - 2.25 };  // 牙齒前緣離第一排地磚邊緣約 0.3
+const CORE_OFFSET = { x: 0, y: 1.0, z: 0.77 };   // 相對 Boss 根節點（面向 +Z）
+const MOUTH_OFFSET = { x: 0, y: 0.95, z: 1.05 }; // 嘴裡磚的位置（BrickSocket，相對 Boss 根節點）
 
 const ABILITIES = {
   boots: { name: '黏土靴', desc: '落地時固定相鄰的鬆動平台' },
@@ -508,7 +509,7 @@ export class IslandGame {
         if (this.now >= b.until) {
           b.state = 'lunge'; b.until = this.now + 0.5;
           // 讓嘴巴（MOUTH_OFFSET）落在目標磚上
-          this.bossMoveTo({ x: cellX(b.locked[0]) - MOUTH_OFFSET.x, y: -0.6, z: cellZ(b.locked[1]) - MOUTH_OFFSET.z }, 0.5);
+          this.bossMoveTo({ x: cellX(b.locked[0]) - MOUTH_OFFSET.x, y: -0.2, z: cellZ(b.locked[1]) - MOUTH_OFFSET.z }, 0.5);
         }
         break;
       case 'lunge':
