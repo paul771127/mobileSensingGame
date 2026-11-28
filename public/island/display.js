@@ -68,7 +68,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x3c5878);
 scene.fog = new THREE.Fog(0x3c5878, 38, 70);
 const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
-const WHITE = new THREE.Color(0xffffff);
+const WHITE = new THREE.Color(0xffffff), RED = new THREE.Color(0xff2a1a);
 const CAM_DIR = new THREE.Vector3(0.05, 1.0, 0.8).normalize();
 
 scene.add(new THREE.HemisphereLight(0xcfe6ff, 0x3a2a1a, 0.9));
@@ -176,6 +176,7 @@ function fallbackBoss() {
   const core = sphere(0.36, new THREE.MeshStandardMaterial({ color: 0xff3fd0, emissive: 0xff2fb0, emissiveIntensity: 1.2, roughness: 0.3 }), 0, 1.1, 1.6, 20); core.name = 'Core'; root.add(core);
   return root;
 }
+function fallbackMob(color, r, lift = 0) { const g = new THREE.Group(); g.add(sphere(r, mat(color), 0, r + lift, 0, 12)); g.add(box(r * 0.9, r * 0.3, r * 0.5, mat(0x222222), 0, r + lift, r * 0.8)); return g; }
 function fallbackTower() {
   const g = new THREE.Group();
   const stone = mat(0x8e94a8), wood = mat(0x7a5533), roof = mat(0xb5443a), gold = mat(0xf2c230, { metalness: 0.5, roughness: 0.3 });
@@ -197,6 +198,9 @@ async function loadModels() {
   models.B = orange || fallbackRepairer(COLORS.B);
   models.boss = boss || fallbackBoss();
   models.tower = tower || fallbackTower();
+  const [mm, mr, mc, orb] = await Promise.all(['mob-melee', 'mob-ranged', 'mob-charger', 'enemy-orb'].map(loadGlb));
+  models.mob = { melee: mm || fallbackMob(0xd9483b, 0.5), ranged: mr || fallbackMob(0x9a5cff, 0.5, 0.6), charger: mc || fallbackMob(0xff8a2a, 0.85) };
+  models.orb = orb || sphere(0.16, new THREE.MeshStandardMaterial({ color: 0xff5ad0, emissive: 0xff2fb0, emissiveIntensity: 1.5 }));
   models.usingGlb = { tile: !!tile, spring: !!spring, A: !!blue, B: !!orange, boss: !!boss, tower: !!tower };
 }
 
@@ -446,9 +450,66 @@ function onPlayerHit(side, p, s) {
   const b = s.boss;
   if (p.hit === 'core') { spawnImpact(b.x + b.core.x, b.y + b.core.y, b.z + b.core.z, 0xff3fd0, '-1', 1.3); shakeAmt = 0.55; bossFlash = 1; bossJolt = 1; popHearts(); }
   else if (p.hit === 'brick') { spawnImpact(b.x + b.mouthOff.x, b.y + b.mouthOff.y, b.z + b.mouthOff.z, 0xffd23f, '鏘！', 1.1); shakeAmt = 0.4; bossFlash = 0.8; bossJolt = 0.8; }
+  else if (p.hit === 'mob') { spawnImpact(p.hx, p.hy, p.hz, 0xff7a3a, '砰！', 1.0); shakeAmt = 0.3; }
+  else if (p.hit === 'orb') { spawnImpact(p.hx, p.hy, p.hz, 0xff5ad0, '', 0.7); }
   else if (p.hit === 'bell') { spawnImpact(s.tower.x + (s.tower.bellX || 0), s.tower.bellY + 0.3, s.tower.z + (s.tower.bellZ || 0), 0xffe07a, '噹！', 1.2); shakeAmt = 0.35; }
 }
 function popHearts() { const hp = $('hp'); hp.classList.remove('pop'); void hp.offsetWidth; hp.classList.add('pop'); }
+
+// ---------- 小怪 / 光球 / 震波 / 衝撞通道 ----------
+const mobViews = new Map(), orbViews = new Map(), waveMeshes = [];
+let laneMesh = null;
+function syncHazards(s, dt, T) {
+  const seen = new Set();
+  for (const m of s.mobs || []) {
+    seen.add(m.id);
+    let v = mobViews.get(m.id);
+    if (!v) {
+      const root = new THREE.Group(), model = models.mob[m.type].clone(); root.add(model);
+      model.traverse((o) => { if (o.isMesh && o.material?.emissive) { o.material = o.material.clone(); o.userData.e0 = o.material.emissive.clone(); o.userData.i0 = o.material.emissiveIntensity; } });
+      const tele = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 9), new THREE.MeshBasicMaterial({ color: 0xff5533, transparent: true, opacity: 0.35, depthWrite: false })); tele.rotation.x = -Math.PI / 2; tele.position.set(0, 0.06, 4.5); tele.visible = false;
+      const pivot = new THREE.Group(); pivot.add(tele); root.add(pivot);
+      world.add(root); v = { root, model, pivot, tele, parts: {}, hp: m.hp };
+      for (const n of ['Head', 'Claw_L', 'Claw_R', 'Foot_L', 'Foot_R', 'HoverBody', 'Fin_L', 'Fin_R', 'RamGuard', 'ChargeLight']) v.parts[n] = model.getObjectByName(n);
+      root.position.set(m.x, m.y, m.z); mobViews.set(m.id, v);
+    }
+    v.last = m;
+    tmpV.set(m.x, m.y, m.z); v.root.position.lerp(tmpV, 1 - Math.exp(-dt * 20));
+    v.model.rotation.y = lerpAngle(v.model.rotation.y, m.f, 1 - Math.exp(-dt * 12)); v.pivot.rotation.y = v.model.rotation.y;
+    const hurt = m.hurtAge < 0.25 ? 1 - m.hurtAge / 0.25 : 0, P = v.parts;
+    v.model.traverse((o) => { if (o.userData.e0) { o.material.emissive.copy(o.userData.e0).lerp(WHITE, hurt); o.material.emissiveIntensity = lerp(o.userData.i0, 1.8, hurt); } });
+    const wind = m.state === 'windup' || m.state === 'aim' || m.state === 'charge';
+    const sq = hurt * 0.3 + (wind ? Math.sin(T * 30) * 0.05 : 0);
+    v.model.scale.set(1 + sq, 1 - sq, 1 + sq);
+    v.model.rotation.z = m.state === 'stun' ? Math.sin(T * 14) * 0.18 : 0;
+    v.model.rotation.x = m.state === 'fall' ? T * 6 : m.state === 'dash' ? 0.25 : 0;
+    const walk = Math.sin(T * 12);
+    if (P.Foot_L) P.Foot_L.rotation.x = m.state === 'move' ? walk * 0.6 : 0; if (P.Foot_R) P.Foot_R.rotation.x = m.state === 'move' ? -walk * 0.6 : 0;
+    const claw = m.state === 'windup' ? -1.5 : m.strikeAge < 0.2 ? 1.0 : 0;
+    if (P.Claw_L) P.Claw_L.rotation.x = lerp(P.Claw_L.rotation.x, claw, 0.4); if (P.Claw_R) P.Claw_R.rotation.x = lerp(P.Claw_R.rotation.x, claw, 0.4);
+    if (P.HoverBody) P.HoverBody.position.y = 0.64 + Math.sin(T * 3 + m.id) * 0.1; if (P.Fin_L) P.Fin_L.rotation.z = Math.sin(T * 6) * 0.4; if (P.Fin_R) P.Fin_R.rotation.z = -Math.sin(T * 6) * 0.4;
+    if (P.RamGuard) P.RamGuard.position.z = 0.53 + (m.state === 'aim' ? -0.18 : m.state === 'dash' ? 0.2 : 0);
+    if (P.ChargeLight?.material) P.ChargeLight.visible = m.state !== 'aim' || Math.sin(T * 40) > 0;
+    v.tele.visible = m.type === 'charger' && m.state === 'aim'; if (v.tele.visible) v.tele.material.opacity = 0.25 + Math.sin(T * 20) * 0.15;
+  }
+  for (const [id, v] of mobViews) if (!seen.has(id)) { const l = v.last; if (l && l.y > -3) spawnImpact(l.x, l.y + 0.5, l.z, 0xff7a3a, '', 1.2); world.remove(v.root); mobViews.delete(id); }
+  const seenO = new Set();
+  for (const o of s.orbs || []) {
+    seenO.add(o.id); let v = orbViews.get(o.id);
+    if (!v) { v = models.orb.clone(); v.scale.setScalar(1.6); world.add(v); orbViews.set(o.id, v); v.position.set(o.x, o.y, o.z); }
+    tmpV.set(o.x, o.y, o.z); v.position.lerp(tmpV, 1 - Math.exp(-dt * 25)); v.rotation.y = T * 8; v.scale.setScalar(1.6 + Math.sin(T * 20) * 0.25);
+  }
+  for (const [id, v] of orbViews) if (!seenO.has(id)) { world.remove(v); orbViews.delete(id); }
+  // 震波：貼地白紅雙圈
+  const waves = s.waves || [];
+  while (waveMeshes.length < waves.length) { const m = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 64), new THREE.MeshBasicMaterial({ color: 0xff5a4a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false })); m.rotation.x = -Math.PI / 2; world.add(m); waveMeshes.push(m); }
+  waveMeshes.forEach((m, i) => { const w = waves[i]; m.visible = !!w; if (w) { m.position.set(w.x, 0.08, w.z); m.scale.setScalar(w.r + 0.3); m.material.opacity = 0.55 + Math.sin(T * 30) * 0.3; } });
+  // 衝撞通道
+  const lane = s.boss.lane;
+  if (!laneMesh) { laneMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.4, depthWrite: false })); laneMesh.rotation.x = -Math.PI / 2; world.add(laneMesh); }
+  laneMesh.visible = !!lane && s.phase === 'play';
+  if (lane) { const z0 = cellZ(-1.2), z1 = cellZ(gridInfo.rows - 0.3); laneMesh.position.set(lane.x, 0.07, (z0 + z1) / 2); laneMesh.scale.set(lane.w * 2, z1 - z0, 1); laneMesh.material.opacity = s.boss.state === 'charge' ? 0.6 : 0.25 + Math.abs(Math.sin(T * 9)) * 0.3; }
+}
 
 let lastEventT = -1, bannerUntil = 0;
 let built = false;
@@ -482,14 +543,15 @@ function updateHud(s) {
   // 巨怪 HP
   const hp = $('hp');
   while (hp.children.length - 1 < s.boss.maxHp) { const h = document.createElement('i'); h.className = 'heart'; hp.appendChild(h); }
-  [...hp.querySelectorAll('.heart')].forEach((h, i) => h.classList.toggle('off', i >= s.boss.hp));
+  [...hp.querySelectorAll('.heart')].forEach((h, i) => { h.classList.toggle('off', i >= s.boss.hp); h.style.display = i < s.boss.maxHp ? '' : 'none'; h.style.marginLeft = i && i % 3 === 0 && s.boss.maxHp > 5 ? '10px' : ''; });
+  hp.dataset.phase = s.boss.maxHp > 5 ? `第 ${s.boss.phase} 階段` : '';
   $('mode').textContent = s.bots ? '你 + 電腦搭檔（窗口加長）' : s.mode >= 2 ? '雙人合作' : s.mode === 1 ? '單人模式（窗口加長）' : '等待玩家';
   // 玩家卡
   const cards = [];
   for (const side of ['A', 'B']) {
     const p = s.players[side];
     const ab = p.ability ? `<span class="tag ${p.ability}">${s.abilities[p.ability].name}</span>` : '';
-    let st = !p.connected ? '未加入' : p.bot && p.dead ? `電腦 · 掉下島… ${p.respawnIn.toFixed(1)}s` : p.dead ? `掉下島… ${p.respawnIn.toFixed(1)}s` : p.pad && p.padT ? `選擇中 ${Math.round(p.padT * 100)}%` : p.onTower ? '在鐘樓上' : s.marks.target === side && s.phase === 'play' ? '被盯上！' : (p.bot ? '電腦搭檔' : p.kb ? '鍵盤' : '手機');
+    let st = !p.connected ? '未加入' : p.bot && p.dead ? `電腦（${p.persona || ''}）· 掉下島… ${p.respawnIn.toFixed(1)}s` : p.dead ? `掉下島… ${p.respawnIn.toFixed(1)}s` : p.pad && p.padT ? `選擇中 ${Math.round(p.padT * 100)}%` : p.onTower ? '在鐘樓上' : s.marks.target === side && s.phase === 'play' ? '被盯上！' : (p.bot ? `電腦搭檔・${p.persona || ''}` : p.kb ? '鍵盤' : '手機');
     cards.push(`<div class="pcard pill ${side} ${p.connected ? '' : 'off'}"><div class="dot"></div><div><b>${side === 'A' ? '1P' : '2P'} ${LABEL[side]}${p.name && !p.kb && !p.bot ? ' · ' + esc(p.name) : ''}</b>${ab}<div class="st">${st}</div></div></div>`);
   }
   $('players').innerHTML = cards.join('');
@@ -507,6 +569,10 @@ function hintFor(s) {
   const springPlat = s.plats.find((p) => p[2] === 1);
   const springInZone = springPlat && s.bridge.some(([c, r]) => c === springPlat[0] && r === springPlat[1]);
   if (s.flight) return s.flight.ok ? '磚飛出去了！落地後會變成可踩的平台' : '<span class="zone-bad">磚飛出島外了……</span>彈簧磚會長回原位，再引一次';
+  if (b.state === 'windup' && b.special === 'stomp') return '<b style="color:#ff6b6b">巨怪要震地！</b>紅色波紋掃到腳邊的瞬間跳起來（手腕短抬）';
+  if ((b.state === 'windup' || b.state === 'charge') && b.special === 'charge') return '<b style="color:#ff6b6b">巨怪要直線衝撞！</b>離開紅色通道，往左右閃';
+  if (b.state === 'windup' && b.special === 'summon') return '巨怪吐出小怪：靠近牠們向前短推敲掉，別被拍下島';
+  if ((s.waves || []).length) return '<b style="color:#ff6b6b">震波來了！</b>掃到腳邊時跳起來';
   if (b.state === 'open') return `<span class="zone-ok">防護打開 ${b.openRemain.toFixed(1)} 秒</span>：靠近巨怪嘴前的粉紅核心，向前短推敲它！`;
   if (b.state === 'stuck') {
     const pr = s.preds.find((p) => p.ready) || s.preds[0];
@@ -552,6 +618,8 @@ function frame(now) {
     v.root.position.copy(v.pos);
     v.model.rotation.y = lerpAngle(v.model.rotation.y, p.facing, k);
     if (p.hitAge < v.lastHitAge - 0.05) onPlayerHit(side, p, s);
+    if (p.hurtAge < (v.lastHurtAge ?? 99) - 0.05) { spawnImpact(p.x, p.y + 0.7, p.z, 0xffffff, '哎！', 0.9); shakeAmt = Math.max(shakeAmt, 0.45); }
+    v.lastHurtAge = p.hurtAge;
     v.lastHitAge = p.hitAge;
     // 跳躍：起跳拉長、落地壓扁、腳下揚塵，影子隨高度縮小
     if (v.wasGrounded && !p.grounded && p.vy > 2) { v.squash = -1; spawnDust(p.x, p.y, p.z); }
@@ -563,6 +631,7 @@ function frame(now) {
     v.model.position.set(Math.sin(p.facing) * lunge, 0, Math.cos(p.facing) * lunge);
     const sy = 1 - v.squash * 0.28 + (p.grounded ? 0 : 0.08), sxz = 1 + v.squash * 0.22;
     v.model.scale.set(sxz, sy, sxz);
+    v.model.rotation.z = p.knocked ? T * 14 : 0; v.model.visible = !(p.hurtAge < 1.0 && !p.knocked && Math.sin(T * 40) > 0.3); // 被打飛翻滾、之後閃爍無敵
     v.model.rotation.x = p.hitAge < 0.3 ? 0.35 * Math.sin(p.hitAge / 0.3 * Math.PI) : (p.grounded ? 0 : -0.15);
     const speed = Math.hypot(p.vx, p.vz);
     v.phase += dt * (6 + speed * 2.2);
@@ -605,6 +674,8 @@ function frame(now) {
   if (b.state === 'stuck') { bossObj.position.x += (Math.random() - 0.5) * 0.08; bossObj.position.y += (Math.random() - 0.5) * 0.05; }
   if (b.state === 'recoil') bossObj.position.x += Math.sin(T * 30) * 0.05;
   const open = b.state === 'stuck' ? 0.08 : b.mouth;
+  if (b.state === 'windup') { bossObj.position.x += Math.sin(T * 45) * 0.06; if (b.special === 'stomp') bossObj.rotation.x = -0.25; }
+  if (b.state === 'charge') bossObj.rotation.x = 0.3;
   if (bossParts.upper) bossParts.upper.rotation.x = lerp(bossParts.upper.rotation.x, -open * 0.5, 1 - Math.exp(-dt * 10));
   if (bossParts.jaw) bossParts.jaw.rotation.x = lerp(bossParts.jaw.rotation.x, open * 0.65, 1 - Math.exp(-dt * 10));
   if (bossParts.core) {
@@ -614,8 +685,9 @@ function frame(now) {
     if (bossParts.core.material?.emissiveIntensity != null) bossParts.core.material.emissiveIntensity = 0.9 + Math.sin(T * 8) * 0.5;
   }
   if (!bossMats) { bossMats = []; bossObj.traverse((o) => { if (o.isMesh && o !== bossParts.core && o.material?.emissive) { o.material = o.material.clone(); bossMats.push({ m: o.material, e: o.material.emissive.clone(), i: o.material.emissiveIntensity }); } }); }
-  for (const { m, e, i } of bossMats) { m.emissive.copy(e).lerp(WHITE, bossFlash); m.emissiveIntensity = lerp(i, 1.6, bossFlash); }
-  bossObj.position.z -= bossJolt * 0.45; bossObj.rotation.x = -bossJolt * 0.22;
+  const rageGlow = b.rage ? 0.25 + Math.sin(T * 6) * 0.12 : b.phase === 2 ? 0.1 : 0;
+  for (const { m, e, i } of bossMats) { m.emissive.copy(e).lerp(RED, rageGlow).lerp(WHITE, bossFlash); m.emissiveIntensity = lerp(i, 1.6, bossFlash); }
+  bossObj.position.z -= bossJolt * 0.45; if (bossJolt > 0) bossObj.rotation.x = -bossJolt * 0.22; else if (b.state !== 'windup' && b.state !== 'charge') bossObj.rotation.x = 0;
   const bj = Math.sin(bossJolt * Math.PI); bossObj.scale.set(1 + bj * 0.14, 1 - bj * 0.12, 1 + bj * 0.14);
   bossObj.rotation.y = 0; bossObj.rotation.z = b.state === 'rest' || b.state === 'aim' ? Math.sin(T * 1.5) * 0.03 : 0;
   // 嘴裡的磚
@@ -694,6 +766,7 @@ function frame(now) {
   // 鐘
   if (bellPivot) { bellSwing = Math.max(0, bellSwing - dt * 0.35); bellPivot.rotation.z = Math.sin(T * 12) * 0.5 * bellSwing; }
 
+  syncHazards(s, dt, T);
   updateFx(dt);
   renderer.render(scene, camera);
 }

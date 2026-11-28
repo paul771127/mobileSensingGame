@@ -10,12 +10,13 @@
   html, body { overflow: hidden; background: #0a1430; }
   #gl { position: fixed; inset: 0; display: block; }
   .hud { position: fixed; pointer-events: none; font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif; }
-  #topbar { top: 14px; left: 0; right: 0; display: flex; justify-content: center; gap: 28px; align-items: center; }
+  #topbar { top: 14px; left: 332px; right: 252px; display: flex; justify-content: center; gap: 10px; align-items: center; white-space: nowrap; }
   .pill { background: rgba(10,16,38,.72); border: 1px solid rgba(255,255,255,.12); border-radius: 14px; padding: 8px 16px; backdrop-filter: blur(6px); }
   #timer { font-size: 34px; font-weight: 900; letter-spacing: .04em; min-width: 130px; text-align: center; }
   #timer.low { color: var(--hp); }
-  #hp { display: flex; gap: 6px; align-items: center; font-weight: 800; }
-  #hp .heart { width: 22px; height: 22px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: var(--hp); box-shadow: 0 0 10px rgba(255,79,122,.6); transform: rotate(45deg) scale(.8); }
+  #hp { display: flex; gap: 3px; align-items: center; font-weight: 800; }
+  #hp .heart { width: 18px; height: 18px; flex: none; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: var(--hp); box-shadow: 0 0 10px rgba(255,79,122,.6); transform: rotate(45deg) scale(.8); }
+  #hp::after { content: attr(data-phase); margin-left: 10px; font-size: 13px; color: #ffb3c4; white-space: nowrap; }
   #hp.pop { animation: hppop .35s ease-out; }
   @keyframes hppop { 0% { transform: scale(1); } 30% { transform: scale(1.35) rotate(-3deg); filter: brightness(2); } 100% { transform: scale(1); } }
   #hp .heart.off { background: #2a3560; box-shadow: none; }

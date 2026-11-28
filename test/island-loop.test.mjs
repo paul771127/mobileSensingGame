@@ -3,7 +3,7 @@
 // 單人與雙人各跑一次，另外驗證落空（磚掉海裡）後彈簧磚會長回來、掉島會復活。
 // 執行：node test/island-loop.test.mjs
 import assert from 'node:assert/strict';
-import { IslandGame, cellX, cellZ, S } from '../server/island.js';
+import { IslandGame, cellX, cellZ, S, PERSONA_KEYS } from '../server/island.js';
 
 const DT = 1 / 60;
 function step(g, seconds, fn) {
@@ -33,7 +33,7 @@ const spring = (g) => [...g.tiles.values()].find((t) => t.kind === 'spring');
 const springPlat = (g) => [...g.platforms.values()].find((p) => p.kind === 'spring');
 
 function runLoop({ two }) {
-  const g = new IslandGame();
+  const g = new IslandGame({ specials: false, mobs: false, phases: false });
   g.setConnected('A', true, 'kb', true);
   if (two) g.setConnected('B', true, 'kb', true);
   g.action('A', 'hit'); // 開始
@@ -91,7 +91,7 @@ function runLoop({ two }) {
   // ---- 4. 敲鐘 → 防護打開
   g.action(jumper, 'hit'); g.update(DT);
   assert.ok(g.bellRungOnce, '鐘應敲響');
-  assert.ok(waitFor(g, () => g.boss.state === 'open', 3), '防護應打開');
+  assert.ok(waitFor(g, () => g.boss.state === 'open', 8), '防護應打開');
   assert.ok(g.snapshot().pads.length === 2, '能力區應出現');
 
   // ---- 5. 打核心
@@ -114,7 +114,7 @@ function runLoop({ two }) {
 
 // ---- 落空重來：敲飛的磚掉進海裡 → 彈簧磚長回 → 可以再引
 function runMissAndRetry() {
-  const g = new IslandGame();
+  const g = new IslandGame({ specials: false, mobs: false, phases: false });
   g.setConnected('A', true, 'kb', true);
   g.action('A', 'hit'); step(g, 3.3);
   const sp = spring(g); const sx = cellX(sp.c), sz = cellZ(sp.r);
@@ -142,7 +142,7 @@ function runMissAndRetry() {
 
 // ---- 吞掉：錯過卡住窗口 → 磚被吞 → 長回
 function runSwallow() {
-  const g = new IslandGame();
+  const g = new IslandGame({ specials: false, mobs: false, phases: false });
   g.setConnected('A', true, 'kb', true);
   g.action('A', 'hit'); step(g, 3.3);
   const sp = spring(g); const sx = cellX(sp.c), sz = cellZ(sp.r);
@@ -160,7 +160,7 @@ function runSwallow() {
 function runAbilities() {
   const g = runLoop({ two: true });
   // 勝利後重開，直接驗證能力區邏輯：把 bellRungOnce 設為 true 模擬鐘響後
-  const g2 = new IslandGame();
+  const g2 = new IslandGame({ specials: false, mobs: false, phases: false });
   g2.setConnected('A', true, 'kb', true); g2.setConnected('B', true, 'kb', true);
   g2.action('A', 'hit'); step(g2, 3.3);
   g2.bellRungOnce = true;
@@ -180,9 +180,9 @@ function runAbilities() {
 
 // ---- 真人 + 電腦搭檔：真人只負責引怪與打核心，其餘交給電腦
 function runWithBot() {
-  const g = new IslandGame();
+  const g = new IslandGame({ specials: false, mobs: false, phases: false });
   g.setConnected('A', true, 'kb', true);
-  g.setBot('B', true);
+  g.setBot('B', true, 'steady');
   assert.equal(g.playerCount(), 2); assert.equal(g.humanCount(), 1);
   g.action('A', 'hit'); step(g, 3.3);
   assert.equal(g.phase, 'play');
@@ -209,9 +209,9 @@ function runWithBot() {
 }
 // ---- 電腦自己也能被盯、自己引怪跳開而不掉島
 function runBotLured() {
-  const g = new IslandGame();
+  const g = new IslandGame({ specials: false, mobs: false, phases: false });
   g.setConnected('A', true, 'kb', true);
-  g.setBot('B', true);
+  g.setBot('B', true, 'steady');
   g.action('A', 'hit'); step(g, 3.3);
   // 真人躲遠一點、什麼都不做；第一次盯 A，A 不站磚 → 咬 A 腳下的磚；第二次盯 B（電腦）
   walkTo(g, 'A', cellX(2), cellZ(1), 5);
@@ -224,9 +224,9 @@ function runBotLured() {
 
 // ---- 彈簧磚西邊那塊磚先被咬掉（敲往斷橋必站的位置）：電腦不該卡死或走進洞裡，等磚長回後仍能通關
 function runBotHoleRecovery() {
-  const g = new IslandGame();
+  const g = new IslandGame({ specials: false, mobs: false, phases: false });
   g.setConnected('A', true, 'kb', true);
-  g.setBot('B', true);
+  g.setBot('B', true, 'steady');
   g.action('A', 'hit'); step(g, 3.3);
   const sp = spring(g);
   let home = [cellX(sp.c - 1), cellZ(sp.r)], alt = [cellX(sp.c - 1), cellZ(sp.r + 1)], first = true, botFalls = 0, wasDead = false;
@@ -243,6 +243,44 @@ function runBotHoleRecovery() {
   assert.ok(botFalls <= 1, `敲鐘前電腦不該一直掉進洞裡（掉了 ${botFalls} 次）`);
 }
 
+// ---- 完整規則（三階段、震地 / 衝撞 / 召喚、小怪）：每種個性的電腦搭檔帶著只會躲的真人都要能通關
+function runFullRules() {
+  for (const persona of PERSONA_KEYS) for (const seed of [11, 12]) {
+    const g = new IslandGame({ seed });
+    g.setConnected('A', true, 'kb', true); g.setBot('B', true, persona); g.action('A', 'hit');
+    const home = [cellX(2), cellZ(5)], alt = [cellX(3), cellZ(5)]; let bells = 0, specials = 0, last = null;
+    const ok = waitFor(g, () => g.phase === 'win' || g.phase === 'lose', 310, () => {
+      const A = g.players.A, b = g.boss;
+      const onLocked = b.locked && Math.round(A.x / S + 4) === b.locked[0] && Math.round(A.z / S + 3) === b.locked[1];
+      const tgt = onLocked ? (Math.abs(A.x - home[0]) < 0.75 ? alt : home) : (['aim', 'lock', 'lunge'].includes(b.state) ? null : home);
+      if (tgt) { const dx = tgt[0] - A.x, dz = tgt[1] - A.z, d = Math.hypot(dx, dz); g.setMove('A', d > 0.1 ? dx / d : 0, d > 0.1 ? dz / d : 0); } else g.setMove('A', 0, 0);
+      const ev = g.lastEvent; if (ev && ev !== last) { last = ev; if (ev.type === 'bell') bells++; if (ev.type === 'special') specials++; }
+    });
+    assert.ok(ok && g.phase === 'win', `${persona} / seed ${seed} 應通關，得到 ${g.phase}`);
+    assert.ok(bells >= 3, `三階段應至少敲 3 次鐘（${persona}：${bells}）`);
+    assert.ok(specials >= 2, '巨怪應使出特殊招式');
+  }
+}
+// ---- 震地：站著被掃到會被撞飛，起跳可以躲；小怪會打人、敲一下就倒
+function runHazards() {
+  const mk = () => { const g = new IslandGame({ seed: 5 }); g.setConnected('A', true, 'kb', true); g.action('A', 'hit'); step(g, 3.3); g.boss.state = 'rest'; g.boss.until = g.now + 99; return g; };
+  let g = mk();
+  g.waves.push({ x: g.boss.x, z: g.boss.z + 1, r: 0.6, t0: g.now, speed: 7.5, hit: {}, roll: {} });
+  assert.ok(waitFor(g, () => g.players.A.hurtAt > 0, 3), '站著應被震波掃到');
+  g = mk();
+  g.waves.push({ x: g.boss.x, z: g.boss.z + 1, r: 0.6, t0: g.now, speed: 7.5, hit: {}, roll: {} });
+  const w = g.waves[0];
+  waitFor(g, () => !g.waves.length, 4, () => { const p = g.players.A; const gap = Math.hypot(p.x - w.x, p.z - w.z) - w.r; if (gap > 0 && gap < 1.2) g.action('A', 'jump'); });
+  assert.ok(g.players.A.hurtAt < 0, '起跳應躲過震波');
+  g = mk();
+  const m = g.spawnMob('melee'); step(g, 0.8);
+  assert.ok(waitFor(g, () => g.players.A.hurtAt > 0, 12), '爪爪怪應追上並拍飛玩家');
+  assert.ok(waitFor(g, () => { const p = g.players.A; return !p.dead && p.grounded && Math.hypot(p.x - m.x, p.z - m.z) < 1.6; }, 12), '爪爪怪應再靠近');
+  g.players.A.hitCd = 0; g.action('A', 'hit'); g.update(DT);
+  assert.equal(g.mobs.length, 0, '敲一下應打倒爪爪怪');
+  assert.equal(g.players.A.hitKind, 'mob');
+}
+
 const t0 = Date.now();
 runLoop({ two: false }); console.log('✓ 單人完整循環');
 runLoop({ two: true }); console.log('✓ 雙人完整循環');
@@ -252,4 +290,6 @@ runAbilities(); console.log('✓ 能力區分流');
 runWithBot(); console.log('✓ 真人 + 電腦搭檔完整循環');
 runBotLured(); console.log('✓ 電腦被盯上會自己引怪跳開');
 runBotHoleRecovery(); console.log('✓ 關鍵磚被咬掉後電腦搭檔仍能通關');
+runHazards(); console.log('✓ 震波可跳躲、小怪會打人也打得倒');
+runFullRules(); console.log('✓ 完整規則下四種個性的電腦搭檔都能通關');
 console.log(`全部通過（${Date.now() - t0} ms）`);

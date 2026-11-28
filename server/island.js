@@ -5,7 +5,8 @@
 export const S = 1.5;                 // 地磚間距
 export const TILE_H = 0.5;            // 疊在地磚上的平台高度
 export const ROUND_TIME = 300;        // 每局秒數
-export const BOSS_MAX_HP = 5;
+export const BOSS_MAX_HP = 9;        // 三階段、每階段 3 滴：每打掉一段防護就合上、巨怪變兇，要再跑一輪
+const BOSS_SEG = 3;
 
 // 地圖：# 地磚、S 彈簧磚、o 出生點、1 黏土靴能力區、2 回音槌能力區、B 斷橋目標區（空）、T 鐘樓（空，塔在上面）、. 海
 const MAP = [
@@ -54,8 +55,27 @@ const ABILITIES = {
   hammer: { name: '回音槌', desc: '敲擊距離變長' },
 };
 
+// 電腦搭檔個性：上場時隨機抽一種，反應、敢不敢搶鐘、追不追小怪、選哪個能力都不同
+const PERSONAS = [
+  { key: 'steady', name: '穩健', react: 0.6, jump: 0.9, hunt: 3.0, bellYield: 1.0, pad: 'hammer', sloppy: false, dodge: 0.9 },
+  { key: 'hasty', name: '急性子', react: 0.15, jump: 0.6, hunt: 2.2, bellYield: -3, pad: 'hammer', sloppy: true, dodge: 0.6 },
+  { key: 'hunter', name: '獵人', react: 0.45, jump: 0.8, hunt: 99, bellYield: 2.5, pad: 'hammer', sloppy: false, dodge: 0.8 },
+  { key: 'careful', name: '謹慎', react: 0.9, jump: 1.0, hunt: 1.8, bellYield: 4, pad: 'boots', sloppy: false, dodge: 1.0 },
+];
+const MOB_DEF = {
+  melee: { name: '爪爪怪', hp: 1, speed: 1.9 },
+  ranged: { name: '浮游晶', hp: 1, speed: 1.6 },
+  charger: { name: '衝撞精英', hp: 2, speed: 1.2 },
+};
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+export const PERSONA_KEYS = PERSONAS.map((x) => x.key);
 export class IslandGame {
-  constructor() {
+  // opts.specials：巨怪的震地 / 衝撞 / 召喚；opts.mobs：小怪；opts.seed：固定亂數（測試用）
+  constructor(opts = {}) {
+    this.opts = { specials: true, mobs: true, phases: true, seed: null, ...opts };
+    this.maxHp = this.opts.phases ? BOSS_MAX_HP : 5;
+    this.rng = this.opts.seed != null ? mulberry32(this.opts.seed) : Math.random;
     this.resetMatch();
   }
 
@@ -75,13 +95,16 @@ export class IslandGame {
     this.players = { A: this.newPlayer('A'), B: this.newPlayer('B') };
     if (keep) for (const s of ['A', 'B']) {
       this.players[s].connected = keep[s].connected; this.players[s].name = keep[s].name; this.players[s].kb = keep[s].kb;
+      this.players[s].bot = keep[s].bot; this.players[s].persona = keep[s].persona;
     }
     this.boss = {
       state: 'rest', until: 0, x: BOSS_ANCHOR.x, y: BOSS_ANCHOR.y, z: BOSS_ANCHOR.z,
       from: null, to: null, moveT0: 0, moveDur: 0,
       target: null, lastTarget: 'B', cands: [], locked: null, held: null,
-      hp: BOSS_MAX_HP, shieldOpenUntil: 0, pendingOpen: 0, stuckDur: 0, mouth: 0.2,
+      hp: this.maxHp, shieldOpenUntil: 0, pendingOpen: 0, stuckDur: 0, mouth: 0.2,
+      bites: 0, special: null, lastSpecial: null, lane: null, extraWaveAt: 0,
     };
+    this.mobs = []; this.orbs = []; this.waves = []; this.mobSeq = 0;
     this.flight = null;
     this.regrow = [];
     this.platforms = new Map();   // key -> { c, r, kind, top, loose, until }
@@ -110,7 +133,7 @@ export class IslandGame {
       x: cellX(this.spawn.c) + (side === 'A' ? -0.4 : 0.4), y: 0, z: cellZ(this.spawn.r), prevY: 0,
       vx: 0, vy: 0, vz: 0, facing: Math.PI, grounded: true, airborne: false,
       dead: false, respawnAt: 0, input: { x: 0, y: 0 }, jumpReq: false, hitReq: false,
-      hitAt: -9, hitCd: 0, ability: null, padKind: null, padT: 0, onTower: false, lastSupportKey: null,
+      hitAt: -9, hitCd: 0, kbUntil: 0, invulnUntil: 0, hurtAt: -9, persona: null, ability: null, padKind: null, padT: 0, onTower: false, lastSupportKey: null,
     };
   }
 
@@ -131,13 +154,14 @@ export class IslandGame {
     }
   }
   // 電腦玩家：占用沒有真人的位置，真人加入時自動讓位
-  setBot(side, on) {
+  setBot(side, on, personaKey = null) {
     const p = this.players[side]; if (!p) return;
     if (on) {
       if (p.connected && !p.bot) return;
       p.connected = true; p.bot = true; p.kb = false; p.name = '電腦';
+      p.persona = PERSONAS.find((x) => x.key === personaKey) || PERSONAS[Math.floor(this.rng() * PERSONAS.length)];
       this.placeAtSafeTile(p); p.dead = false; p.input = { x: 0, y: 0 };
-      this.pushEvent('bot', `電腦搭檔（${this.label(side)}）上場`, side);
+      this.pushEvent('bot', `電腦搭檔（${this.label(side)}・${p.persona.name}）上場`, side);
     } else if (p.bot) {
       p.connected = false; p.bot = false; p.input = { x: 0, y: 0 };
       if (this.humanCount() === 0 && this.phase !== 'lobby') this.resetMatch();
@@ -185,6 +209,8 @@ export class IslandGame {
     this.updateRegrow();
     this.updatePlatforms();
     this.updateBoss(dt, n);
+    this.updateHazards(dt);
+    this.updateMobs(dt);
     this.updateFlight();
     this.updateBots(dt);
     this.updatePlayers(dt, false);
@@ -243,11 +269,12 @@ export class IslandGame {
       }
       // 水平
       const ctrl = p.grounded ? 1 : AIR_CONTROL;
-      const tx = p.input.x * PLAYER_SPEED, tz = p.input.y * PLAYER_SPEED;
-      const acc = (p.grounded ? 28 : 14) * dt;
+      const kb = this.now < p.kbUntil; // 被打飛：暫時不受控、幾乎不減速
+      const tx = kb ? 0 : p.input.x * PLAYER_SPEED, tz = kb ? 0 : p.input.y * PLAYER_SPEED;
+      const acc = (kb ? 3 : p.grounded ? 28 : 14) * dt;
       p.vx = approach(p.vx, tx, acc * ctrl + (p.grounded ? 0 : 0));
       p.vz = approach(p.vz, tz, acc * ctrl);
-      if (Math.hypot(p.input.x, p.input.y) > 0.15) p.facing = Math.atan2(p.input.x, p.input.y);
+      if (!kb && Math.hypot(p.input.x, p.input.y) > 0.15) p.facing = Math.atan2(p.input.x, p.input.y);
       p.x += p.vx * dt; p.z += p.vz * dt;
       // 場地外圍硬邊界（海面範圍）
       p.x = clamp(p.x, cellX(-1), cellX(COLS)); p.z = clamp(p.z, cellZ(-1), cellZ(ROWS));
@@ -261,7 +288,7 @@ export class IslandGame {
         if (sf.top <= p.y + 0.06 && p.y - sf.top <= 0.25) { support = sf; break; }
         if (p.grounded && sf.top > p.y && sf.top - p.y <= STEP_UP) { support = sf; break; }
       }
-      if (p.jumpReq && p.grounded) { p.vy = JUMP_VY; p.grounded = false; p.airborne = true; }
+      if (p.jumpReq && p.grounded && !kb) { p.vy = JUMP_VY; p.grounded = false; p.airborne = true; }
       p.jumpReq = false;
       if (!p.grounded || !support) {
         p.vy -= GRAVITY * dt;
@@ -343,6 +370,11 @@ export class IslandGame {
       this.pushEvent('corehit', b.hp > 0 ? `${this.label(p.side)} 打中核心！剩 ${b.hp}` : '核心碎了！', p.side);
       b.coreHitT = this.now; p.hitKind = 'core';
       if (b.hp <= 0) this.finish('win');
+      else if (this.opts.phases && b.hp % BOSS_SEG === 0) { // 打掉一段：防護提前合上、怒吼震波、進下一階段
+        b.state = 'recoil'; b.until = this.now + 1.8; b.shieldOpenUntil = this.now; b.lastMove = 'special'; b.special = null;
+        this.waves.push({ x: b.x, z: b.z + 1.0, r: 0.6, t0: this.now + 0.35, speed: 7.5, hit: {}, roll: {} });
+        this.pushEvent('phase', `巨怪暴怒，進入第 ${this.bossPhase()} 階段！防護合上了，再引牠咬一次彈簧磚`, null);
+      }
       return;
     }
     // 2. 卡住的巨怪 → 敲飛嘴裡的磚
@@ -352,6 +384,20 @@ export class IslandGame {
     }
     // 3. 鐘
     if (this.inReach(p, this.bellPos(), 2.5) && p.onTower) { p.hitKind = 'bell'; this.ringBell(p); return; }
+    // 4. 小怪 / 光球
+    const range = this.hitRange(p) + 0.25;
+    let mob = null, md = range;
+    for (const m of this.mobs) { if (m.state === 'fall') continue; const d = Math.hypot(m.x - p.x, m.z - p.z); if (d <= md && Math.abs(m.y - p.y) < 1.8) { md = d; mob = m; } }
+    if (mob) {
+      mob.hp--; mob.hurtAt = this.now; p.hitKind = 'mob'; p.hitX = mob.x; p.hitZ = mob.z; p.hitY = mob.y + 0.6;
+      p.facing = Math.atan2(mob.x - p.x, mob.z - p.z);
+      const d = md || 1; mob.kx = (mob.x - p.x) / d * 5; mob.kz = (mob.z - p.z) / d * 5;
+      if (mob.state === 'dash' || mob.state === 'aim' || mob.state === 'windup' || mob.state === 'charge') { mob.state = 'stun'; mob.until = this.now + 0.8; }
+      if (mob.hp <= 0) { this.mobs = this.mobs.filter((x) => x !== mob); this.pushEvent('mobdown', `${this.label(p.side)} 打倒了${MOB_DEF[mob.type].name}！`, p.side, true); }
+      return;
+    }
+    const orb = this.orbs.find((o) => Math.hypot(o.x - p.x, o.z - p.z) <= range);
+    if (orb) { this.orbs = this.orbs.filter((o) => o !== orb); p.hitKind = 'orb'; p.hitX = orb.x; p.hitZ = orb.z; p.hitY = orb.y; return; }
     // 落空
     p.hitKind = 'miss';
     this.pushEvent('whiff', '', p.side, true);
@@ -394,13 +440,15 @@ export class IslandGame {
     const first = !this.bellRungOnce;
     this.bellRungOnce = true;
     b.pendingOpen = dur;
+    // 鐘聲把彈簧平台震鬆：每一階段都要重新引怪、敲一塊新的過來
+    for (const pl of this.platforms.values()) if (pl.kind === 'spring') { pl.loose = true; pl.until = Math.min(pl.until, this.now + 1.5); }
     if (b.state !== 'stuck' && b.state !== 'lunge') this.openShield();
     this.pushEvent('bell', `${this.label(p.side)} 敲響了鐘！巨怪防護打開 ${dur} 秒，打核心！${first ? ' 能力區出現了' : ''}`, p.side);
   }
   openShield() {
     const b = this.boss;
     b.state = 'open'; b.shieldOpenUntil = this.now + b.pendingOpen; b.pendingOpen = 0;
-    b.locked = null; b.cands = []; b.target = null;
+    b.locked = null; b.cands = []; b.target = null; b.special = null; b.lane = null;
     this.bossMoveTo(BOSS_ANCHOR, 0.6);
   }
 
@@ -484,7 +532,10 @@ export class IslandGame {
         if (this.now >= b.until) {
           const t = this.pickTarget();
           if (!t) { b.until = this.now + 1; break; }
-          b.target = t; b.lastTarget = t; b.state = 'aim'; b.until = this.now + 2.5;
+          // 每咬一口之後接一招特殊攻擊（震地 / 衝撞 / 召喚），不再只是慢慢宣告一口
+          if (this.opts.specials && b.bites > 0 && b.special === null && b.lastMove === 'bite') { this.startSpecial(t); break; }
+          b.lastMove = 'bite'; b.special = null;
+          b.target = t; b.lastTarget = t; b.state = 'aim'; b.until = this.now + (n >= 2 ? 1.5 : 1.9) * this.bossTempo();
           this.pushEvent('target', `巨怪盯上了 ${this.label(t)}！站上想讓它咬的磚，鎖定後跳開`, t);
         }
         break;
@@ -498,7 +549,7 @@ export class IslandGame {
           let cell = this.tiles.has(key(c, r)) ? [c, r] : null;
           if (!cell) { const t = this.nearestTile(p.x, p.z); cell = t ? [t.c, t.r] : null; }
           if (!cell) { b.state = 'rest'; b.until = this.now + 1; b.cands = []; break; }
-          b.locked = cell; b.cands = [cell]; b.state = 'lock'; b.until = this.now + 0.9;
+          b.locked = cell; b.cands = [cell]; b.state = 'lock'; b.until = this.now + 0.7;
           this.pushEvent('lock', `鎖定落點！${this.label(b.target)} 快離開那塊磚`, b.target);
         }
         break;
@@ -516,6 +567,10 @@ export class IslandGame {
         if (this.now >= b.until) {
           const k = key(b.locked[0], b.locked[1]);
           const tile = this.tiles.get(k);
+          b.bites++;
+          // 咬下的衝擊：還賴在落點旁的人會被撞飛
+          const bx = cellX(b.locked[0]), bz = cellZ(b.locked[1]);
+          for (const sd of ['A', 'B']) { const q = this.players[sd]; if (q.connected && !q.dead && q.y < 1.2 && Math.hypot(q.x - bx, q.z - bz) < 1.1) this.knockPlayer(q, q.x - bx, q.z - bz + 0.01, 6.5, 5.5, '被咬擊撞飛'); }
           if (tile) {
             this.tiles.delete(k);
             b.held = { kind: tile.kind, origin: { c: tile.c, r: tile.r } };
@@ -542,14 +597,162 @@ export class IslandGame {
         b.mouth = approach(b.mouth, 0.6, dt * 3);
         if (this.now >= b.until) {
           if (b.pendingOpen) this.openShield();
-          else { b.state = 'rest'; b.until = this.now + 1.5; }
+          else { b.state = 'rest'; b.until = this.now + 0.9 * this.bossTempo(); }
         }
         break;
+      case 'windup': {
+        b.mouth = approach(b.mouth, b.special === 'summon' ? 1 : 0.3, dt * 4);
+        if (this.now < b.until) break;
+        if (b.special === 'stomp') {
+          this.waves.push({ x: b.x, z: b.z + 1.0, r: 0.6, t0: this.now, speed: 7.5, hit: {}, roll: {} });
+          if (this.bossPhase() >= 3) b.extraWaveAt = this.now + 0.7;
+          this.pushEvent('stomp', '震地！波紋到腳邊時跳起來', null, true);
+          b.state = 'recoil'; b.until = this.now + 1.1; this.bossMoveTo(BOSS_ANCHOR, 0.25);
+        } else if (b.special === 'charge') {
+          b.state = 'charge'; b.until = this.now + 0.75;
+          this.bossMoveTo({ x: b.lane.x, y: 0, z: cellZ(ROWS - 1) + 0.6 }, 0.75);
+        } else {
+          const cap = (n >= 2 ? 3 : 2) - this.mobs.length;
+          for (let i = 0; i < Math.min(cap, n >= 2 ? 2 : 1); i++) this.spawnMob();
+          b.state = 'recoil'; b.until = this.now + 0.8;
+        }
+        break;
+      }
+      case 'charge': {
+        b.mouth = 0.8;
+        for (const sd of ['A', 'B']) {
+          const q = this.players[sd];
+          if (q.connected && !q.dead && q.y < 1.6 && Math.abs(q.x - b.x) < 1.5 && Math.abs(q.z - (b.z + 0.5)) < 1.4) this.knockPlayer(q, q.x >= b.x ? 1 : -1, 0.25, 8, 6, '被巨怪撞飛');
+        }
+        if (this.now >= b.until) { b.lane = null; b.state = 'recoil'; b.until = this.now + 1.3; this.bossMoveTo(BOSS_ANCHOR, 1.0); }
+        break;
+      }
       case 'open':
         b.mouth = approach(b.mouth, 1, dt * 3);
         if (this.now >= b.shieldOpenUntil) { b.state = 'rest'; b.until = this.now + 1.2; this.pushEvent('close', '防護合上了，再敲一次鐘', null); }
         break;
     }
+  }
+
+  bossPhase() { return this.opts.phases ? Math.min(3, 1 + Math.floor((this.maxHp - this.boss.hp) / BOSS_SEG)) : (this.boss.hp <= 2 ? 3 : 1); }
+  bossTempo() { return [1, 0.85, 0.7][this.bossPhase() - 1]; } // 越後面節奏越快；第三階段震地變兩圈
+  startSpecial(targetSide) {
+    const b = this.boss, t = this.players[targetSide];
+    const ph = this.bossPhase();
+    const pool = ph >= 2 ? ['stomp', 'charge'] : ['stomp'];
+    if (this.opts.mobs && this.mobs.length < (this.humanCount() >= 2 ? 3 : 2)) pool.push('summon', 'summon');
+    let pick = pool[Math.floor(this.rng() * pool.length)];
+    if (pick === b.lastSpecial && pool.length > 1) pick = pool[(pool.indexOf(pick) + 1 + Math.floor(this.rng() * (pool.length - 1))) % pool.length];
+    b.special = pick; b.lastSpecial = pick; b.lastMove = 'special'; b.state = 'windup'; b.target = null;
+    if (pick === 'stomp') { b.until = this.now + 0.9 * this.bossTempo(); this.bossMoveTo({ x: BOSS_ANCHOR.x, y: 2.4, z: BOSS_ANCHOR.z }, 0.8 * this.bossTempo()); this.pushEvent('special', '巨怪跳起來要震地！波紋到腳邊時跳', null); }
+    else if (pick === 'charge') {
+      const x = clamp(t.x, cellX(1), cellX(7));
+      b.lane = { x, w: 1.5 }; b.until = this.now + 1.0 * this.bossTempo();
+      this.bossMoveTo({ x, y: 0, z: BOSS_ANCHOR.z }, 0.6);
+      this.pushEvent('special', '巨怪要直線衝撞！離開紅色通道', null);
+    } else { b.until = this.now + 0.8; this.pushEvent('special', '巨怪吐出小怪！靠近敲掉牠們', null); }
+  }
+  knockPlayer(p, dx, dz, power, up, why) {
+    if (p.dead || this.now < p.invulnUntil) return false;
+    const d = Math.hypot(dx, dz) || 1;
+    p.vx = dx / d * power; p.vz = dz / d * power; p.vy = up; p.y += 0.05; p.grounded = false; p.airborne = true; p.bounced = false;
+    p.kbUntil = this.now + 0.45; p.invulnUntil = this.now + 1.0; p.hurtAt = this.now; p.padT = 0;
+    this.pushEvent('hurt', `${this.label(p.side)} ${why}！`, p.side, true);
+    return true;
+  }
+  // 震波：從巨怪腳下往外擴，掃到站在地上的人就撞飛；跳起來可以躲
+  updateHazards(dt) {
+    const b = this.boss;
+    if (b.extraWaveAt && this.now >= b.extraWaveAt) { b.extraWaveAt = 0; this.waves.push({ x: BOSS_ANCHOR.x, z: BOSS_ANCHOR.z + 1.0, r: 0.6, t0: this.now, speed: 7.5, hit: {}, roll: {} }); }
+    for (const w of this.waves) {
+      w.r = 0.6 + Math.max(0, this.now - w.t0) * w.speed;
+      for (const sd of ['A', 'B']) {
+        const p = this.players[sd]; if (!p.connected || p.dead || w.hit[sd]) continue;
+        const d = Math.hypot(p.x - w.x, p.z - w.z);
+        if (Math.abs(d - w.r) < 0.4) { if (p.grounded && !p.onTower) { w.hit[sd] = true; this.knockPlayer(p, p.x - w.x, p.z - w.z, 5.5, 5.5, '被震波掃到'); } }
+        else if (w.r > d + 0.4) w.hit[sd] = true;
+      }
+    }
+    this.waves = this.waves.filter((w) => w.r < 17);
+    for (const o of this.orbs) {
+      o.x += o.vx * dt; o.z += o.vz * dt;
+      for (const sd of ['A', 'B']) { const p = this.players[sd]; if (p.connected && !p.dead && Math.hypot(p.x - o.x, p.z - o.z) < 0.6 && Math.abs(p.y + 0.6 - o.y) < 0.9) { if (this.knockPlayer(p, o.vx, o.vz, 5.5, 4.5, '被光球打中')) o.until = 0; } }
+    }
+    this.orbs = this.orbs.filter((o) => this.now < o.until);
+  }
+
+  // ---------- 小怪 ----------
+  mobGround(x, z) { const sf = this.surfacesAt(x, z).filter((f) => f.top <= TILE_H + 0.01); return sf.length ? Math.max(...sf.map((f) => f.top)) : null; }
+  spawnMob(type) {
+    const ph = this.bossPhase();
+    const pool = ['melee', 'melee'];
+    if (ph >= 2) pool.push('ranged', 'ranged');
+    if (ph >= 3 && !this.mobs.some((m) => m.type === 'charger')) pool.push('charger', 'charger');
+    type = type || pool[Math.floor(this.rng() * pool.length)];
+    const spots = [...this.tiles.values()].filter((t) => t.r <= 2 && t.kind !== 'spring' && !this.mobs.some((m) => Math.hypot(m.tx - cellX(t.c), m.tz - cellZ(t.r)) < 1));
+    const t = spots.length ? spots[Math.floor(this.rng() * spots.length)] : this.nearestTile(0, cellZ(1));
+    if (!t) return null;
+    const m0 = this.mouthPos();
+    const m = { id: ++this.mobSeq, type, hp: MOB_DEF[type].hp, x: m0.x, y: m0.y, z: m0.z, fx: m0.x, fy: m0.y, fz: m0.z, tx: cellX(t.c), tz: cellZ(t.r), facing: 0, state: 'spawn', t0: this.now, until: this.now + 0.7, cd: this.now + 1.5 + this.rng(), hurtAt: -9, kx: 0, kz: 0 };
+    this.mobs.push(m); return m;
+  }
+  updateMobs(dt) {
+    for (const m of this.mobs) {
+      const def = MOB_DEF[m.type];
+      if (m.state === 'spawn') { // 從巨怪嘴裡拋到島上
+        const q = clamp((this.now - m.t0) / 0.7, 0, 1);
+        m.x = m.fx + (m.tx - m.fx) * q; m.z = m.fz + (m.tz - m.fz) * q; m.y = m.fy * (1 - q) + Math.sin(q * Math.PI) * 2 + (m.type === 'ranged' ? 0 : 0);
+        if (q >= 1) { m.state = 'move'; m.y = this.mobGround(m.x, m.z) ?? 0; }
+        continue;
+      }
+      if (m.state === 'fall') { m.vy = (m.vy || 0) - GRAVITY * dt; m.y += m.vy * dt; continue; }
+      // 被敲的擊退
+      if (m.kx || m.kz) { m.x += m.kx * dt; m.z += m.kz * dt; m.kx = approach(m.kx, 0, 18 * dt); m.kz = approach(m.kz, 0, 18 * dt); }
+      const ground = this.mobGround(m.x, m.z);
+      if (m.type !== 'ranged') { if (ground == null) { m.state = 'fall'; m.vy = 0; if (m.type === 'charger') this.pushEvent('mobdown', '衝撞精英衝出島外了！', null); continue; } m.y = ground; }
+      else m.y = 0;
+      // 目標：最近、還在島上的玩家
+      let tp = null, td = Infinity;
+      for (const sd of ['A', 'B']) { const p = this.players[sd]; if (!p.connected || p.dead || p.onTower || p.y > 2) continue; const d = Math.hypot(p.x - m.x, p.z - m.z); if (d < td) { td = d; tp = p; } }
+      const face = () => { if (tp) m.facing = Math.atan2(tp.x - m.x, tp.z - m.z); };
+      const step = (dirX, dirZ, speed, needGround) => {
+        const nx = m.x + dirX * speed * dt, nz = m.z + dirZ * speed * dt;
+        if (needGround && this.mobGround(nx + dirX * 0.35, nz + dirZ * 0.35) == null) return false;
+        m.x = clamp(nx, cellX(-0.4), cellX(COLS - 3.6)); m.z = clamp(nz, cellZ(-0.4), cellZ(ROWS - 0.6)); return true;
+      };
+      if (m.state === 'stun') { if (this.now >= m.until) { m.state = 'move'; m.cd = this.now + 1.2; } continue; }
+      if (!tp) continue;
+      const dx = (tp.x - m.x) / (td || 1), dz = (tp.z - m.z) / (td || 1);
+      if (m.type === 'melee') {
+        if (m.state === 'move') { face(); if (td > 0.95) step(dx, dz, def.speed, true); else if (this.now >= m.cd) { m.state = 'windup'; m.until = this.now + 0.45; } }
+        else if (m.state === 'windup' && this.now >= m.until) {
+          if (td < 1.3 && Math.abs(tp.y - m.y) < 1.0) this.knockPlayer(tp, dx, dz, 6, 5, '被爪爪怪拍飛');
+          m.state = 'move'; m.cd = this.now + 1.1; m.strikeAt = this.now;
+        }
+      } else if (m.type === 'ranged') {
+        if (m.state === 'move') {
+          face();
+          if (td > 5.2) step(dx, dz, def.speed, false); else if (td < 3.6) step(-dx, -dz, def.speed, false);
+          if (this.now >= m.cd && td < 9) { m.state = 'charge'; m.until = this.now + 0.8; }
+        } else if (m.state === 'charge') {
+          face();
+          if (this.now >= m.until) {
+            const sx = m.x + Math.sin(m.facing) * 0.5, sz = m.z + Math.cos(m.facing) * 0.5;
+            this.orbs.push({ id: ++this.mobSeq, x: sx, y: 0.85, z: sz, vx: Math.sin(m.facing) * 6.5, vz: Math.cos(m.facing) * 6.5, until: this.now + 2.2 });
+            m.state = 'move'; m.cd = this.now + 3.0 + this.rng();
+          }
+        }
+      } else { // charger：瞄準 → 直線衝 → 暈；衝出島外就自己掉下去
+        if (m.state === 'move') { face(); if (td > 2.5) step(dx, dz, def.speed, true); if (this.now >= m.cd && td < 7) { m.state = 'aim'; m.until = this.now + 1.0; } }
+        else if (m.state === 'aim') { if (this.now < m.until - 0.3) face(); if (this.now >= m.until) { m.state = 'dash'; m.until = this.now + 1.1; } }
+        else if (m.state === 'dash') {
+          m.x += Math.sin(m.facing) * 9 * dt; m.z += Math.cos(m.facing) * 9 * dt;
+          if (td < 1.15 && Math.abs(tp.y - m.y) < 1.2) this.knockPlayer(tp, Math.sin(m.facing) + dx * 0.3, Math.cos(m.facing) + dz * 0.3, 8.5, 6, '被衝撞精英撞飛');
+          if (this.now >= m.until) { m.state = 'stun'; m.until = this.now + 1.6; }
+        }
+      }
+    }
+    this.mobs = this.mobs.filter((m) => m.y > -7);
   }
 
   // ---------- 電腦玩家 ----------
@@ -571,6 +774,29 @@ export class IslandGame {
       if (p.bounced) { const dx = TOWER.x - p.x, dz = TOWER.z - p.z, d = Math.hypot(dx, dz) || 1; const k = Math.min(1, d / 0.8); p.input.x = dx / d * k; p.input.y = dz / d * k; }
       return;
     }
+    const per = p.persona || PERSONAS[0];
+    if (this.now < p.kbUntil) return;
+    // 震波：快掃到時起跳（會不會跳、跳得準不準看個性）
+    for (const w of this.waves) {
+      if (w.hit[p.side]) continue;
+      if (w.roll[p.side] == null) w.roll[p.side] = this.rng() < per.jump;
+      const gap = Math.hypot(p.x - w.x, p.z - w.z) - w.r;
+      if (w.roll[p.side] && gap > 0 && gap < 1.5 && !p.onTower) { p.jumpReq = true; }
+    }
+    // 衝撞通道：橫向閃開
+    if (b.lane && (b.state === 'windup' || b.state === 'charge') && Math.abs(p.x - b.lane.x) < 2.1 && !p.onTower) {
+      if (b.laneRoll?.[p.side] == null) { b.laneRoll = b.laneRoll || {}; b.laneRoll[p.side] = this.rng() < per.dodge; }
+      if (b.laneRoll[p.side]) {
+        const side = p.x >= b.lane.x ? 1 : -1;
+        for (const sgn of [side, -side]) { const gx = b.lane.x + sgn * 2.7; if (this.surfacesAt(gx, p.z).length) { this.botMoveTo(p, gx, p.z, true); return; } }
+      }
+    } else if (!b.lane) b.laneRoll = null;
+    // 小怪貼臉：順手敲掉（除非正要敲嘴裡的磚，免得把磚敲歪）
+    let nearMob = null, nearD = Infinity;
+    for (const m of this.mobs) { if (m.state === 'fall' || m.state === 'spawn') continue; const d = Math.hypot(m.x - p.x, m.z - p.z); if (d < nearD) { nearD = d; nearMob = m; } }
+    const busyBrick = b.state === 'stuck' && b.held && this.inReach(p, this.mouthPos(), 2.2);
+    const busyCore = b.state === 'open' && this.inReach(p, this.corePos(), 1.8);
+    if (nearMob && nearD <= this.hitRange(p) && !busyBrick && !busyCore && !p.onTower && this.now >= p.hitCd) p.hitReq = true;
     // 腳下的磚被鎖定：往遠離巨怪的方向跳到鄰磚
     if (b.locked && (b.state === 'lock' || b.state === 'lunge') && b.locked[0] === pc && b.locked[1] === pr) {
       const esc = this.botEscapeCell(pc, pr);
@@ -592,8 +818,8 @@ export class IslandGame {
       const pred = this.predictLanding(p);
       const remain = b.until - this.now;
       // 彈簧磚只在落點對準斷橋時才敲：敲歪會卡在別處 30 秒，不如讓它被吞掉、8 秒後長回原位重來
-      const good = pred.ok && (b.held.kind !== 'spring' || pred.inZone);
-      const reacted = this.now - b.stuckAt >= 0.8 || remain < 0.6; // 反應時間：留給真人先敲的機會
+      const good = pred.ok && (b.held.kind !== 'spring' || pred.inZone || (per.sloppy && remain < 1.5)); // 急性子等不及會亂敲
+      const reacted = this.now - b.stuckAt >= per.react + 0.2 || remain < 0.6; // 反應時間：留給真人先敲的機會
       if (this.inReach(p, m, 2.2) && good && reacted) { stop(); if (this.now >= p.hitCd) p.hitReq = true; return; }
       if (spot) this.botMoveTo(p, spot.x, spot.z, true); else stop();
       return;
@@ -614,7 +840,7 @@ export class IslandGame {
       if (p.onTower) { if (this.inReach(p, bell, 2.5)) { stop(); if (this.now >= p.hitCd) p.hitReq = true; } else this.botMoveTo(p, TOWER.x + BELL_OFFSET.x * 0.4, TOWER.z + BELL_OFFSET.z * 0.4, true); return; }
       const px = cellX(springPlat.c), pz = cellZ(springPlat.r);
       const myD = Math.hypot(p.x - px, p.z - pz), hD = human ? Math.hypot(human.x - px, human.z - pz) : Infinity;
-      const iGo = !human || (!human.onTower && hD > myD + 1.0);
+      const iGo = !human || (!human.onTower && hD > myD + per.bellYield);
       if (iGo) { this.botMoveTo(p, px, pz, true); return; }
       this.botMoveTo(p, coreFront.x, coreFront.z, true); return;
     }
@@ -628,9 +854,13 @@ export class IslandGame {
         if (spot) { this.botMoveTo(p, spot.x, spot.z, true); return; }
       }
     }
-    // 鐘響後沒能力：去拿回音槌
+    // 有空就去追小怪（追多遠看個性；獵人滿場追）
+    if (nearMob && nearD < per.hunt && nearMob.type !== 'ranged' || (nearMob && per.key === 'hunter' && nearD < 12)) {
+      if (this.mobGround(nearMob.x, nearMob.z) != null || nearD < 2.6) { this.botMoveTo(p, nearMob.x, nearMob.z, false); return; }
+    }
+    // 鐘響後沒能力：去拿個性偏好的能力
     if (this.bellRungOnce && !p.ability) {
-      const pad = this.pads.find((x) => x.kind === 'hammer');
+      const pad = this.pads.find((x) => x.kind === per.pad);
       if (pad) { this.botMoveTo(p, cellX(pad.c), cellZ(pad.r), true); return; }
     }
     // 閒置：站在彈簧磚南邊一格（不擋路、也不會被連帶咬到）
@@ -764,7 +994,7 @@ export class IslandGame {
         connected: p.connected, name: p.name, kb: p.kb, bot: p.bot,
         x: r3(p.x), y: r3(p.y), z: r3(p.z), vx: r3(p.vx), vz: r3(p.vz), vy: r3(p.vy), facing: r3(p.facing),
         grounded: p.grounded, dead: p.dead, respawnIn: p.dead ? Math.max(0, p.respawnAt - this.now) : 0,
-        ability: p.ability, hitAge: r3(this.now - p.hitAt), hit: p.hitKind || 'miss', onTower: p.onTower, pad: p.padKind, padT: p.padT ? r3(p.padT / PAD_TIME) : 0,
+        ability: p.ability, hitAge: r3(this.now - p.hitAt), hit: p.hitKind || 'miss', hx: r3(p.hitX || 0), hy: r3(p.hitY || 0), hz: r3(p.hitZ || 0), hurtAge: r3(this.now - p.hurtAt), knocked: this.now < p.kbUntil, persona: p.bot && p.persona ? p.persona.name : null, onTower: p.onTower, pad: p.padKind, padT: p.padT ? r3(p.padT / PAD_TIME) : 0,
       };
     }
     let flight = null;
@@ -777,11 +1007,15 @@ export class IslandGame {
       tiles, plats, regrow,
       marks: { cands: b.cands, locked: b.locked, target: b.target },
       boss: {
-        x: r3(b.x), y: r3(b.y), z: r3(b.z), state: b.state, hp: b.hp, maxHp: BOSS_MAX_HP, mouth: r3(b.mouth), held: b.held ? b.held.kind : null,
+        x: r3(b.x), y: r3(b.y), z: r3(b.z), state: b.state, hp: b.hp, maxHp: this.maxHp, phase: this.bossPhase(), mouth: r3(b.mouth), held: b.held ? b.held.kind : null,
         openRemain: b.state === 'open' ? r3(Math.max(0, b.shieldOpenUntil - this.now)) : 0, stuckRemain: b.state === 'stuck' ? r3(Math.max(0, b.until - this.now)) : 0,
+        special: b.special, lane: b.lane, rage: this.bossPhase() >= 3, windupRemain: b.state === 'windup' ? r3(Math.max(0, b.until - this.now)) : 0,
         target: b.target, coreHitAge: b.coreHitT != null ? r3(this.now - b.coreHitT) : 99, anchor: BOSS_ANCHOR, core: CORE_OFFSET, mouthOff: MOUTH_OFFSET,
       },
       flight, preds,
+      mobs: this.mobs.map((m) => ({ id: m.id, type: m.type, x: r3(m.x), y: r3(m.y), z: r3(m.z), f: r3(m.facing), state: m.state, hp: m.hp, hurtAge: r3(this.now - m.hurtAt), strikeAge: r3(this.now - (m.strikeAt ?? -9)) })),
+      orbs: this.orbs.map((o) => ({ id: o.id, x: r3(o.x), y: o.y, z: r3(o.z) })),
+      waves: this.waves.map((w) => ({ x: w.x, z: w.z, r: r3(w.r) })),
       bridge: this.bridge, tower: { x: TOWER.x, z: TOWER.z, c: TOWER.c, r: TOWER.r, top: TOWER.top, radius: TOWER.radius, bellY: TOWER.top + 0.8, bellX: BELL_OFFSET.x, bellZ: BELL_OFFSET.z },
       pads: this.bellRungOnce ? this.pads : [], padsVisible: this.bellRungOnce,
       bell: { age: r3(this.now - this.bellRingT) },
