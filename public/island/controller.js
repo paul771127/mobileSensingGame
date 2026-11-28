@@ -87,7 +87,9 @@ function startCalibration() {
   calibTimer = setInterval(() => {
     if (orient) {
       $('calibDone').disabled = false;
-      $('calibLive').textContent = `偵測到姿態：手機仰角 ${pitchDeg.toFixed(0)}°、左右傾 ${rollDeg.toFixed(0)}°`;
+      const d = pitchDeg - NEUTRAL_PITCH;
+      const where = Math.abs(d) < DEAD ? '剛好是不動姿勢 ✓' : d > 0 ? `再往前壓 ${Math.round(d)}° 就是不動姿勢` : `再往後抬 ${Math.round(-d)}° 就是不動姿勢`;
+      $('calibLive').textContent = `目前仰角 ${pitchDeg.toFixed(0)}°（不動 = ${NEUTRAL_PITCH}°）：${where}`;
     } else if (performance.now() - t0 > 2500) {
       $('calibDone').disabled = false;
       $('calibLive').textContent = '沒有收到姿態資料：將只能用下方按鈕操作。';
@@ -96,11 +98,11 @@ function startCalibration() {
 }
 $('calibDone').onclick = () => {
   clearInterval(calibTimer);
-  captureBase();
+  resetBase(); // 預設不動 = 往前傾 45°，不用校正時的角度
   joined = true;
   sendJoin();
 };
-$('calib').onclick = () => { captureBase(); flashGesture('已重新校正', 'hit'); };
+$('calib').onclick = () => { captureBase(); flashGesture(`已重新校正：不動 = 仰角 ${basePitch.toFixed(0)}°`, 'hit'); };
 $('leave').onclick = () => { joined = false; mySide = null; ws.send({ type: 'leave' }); location.href = '/island/controller'; };
 
 async function enableMotion() {
@@ -125,9 +127,13 @@ async function enableMotion() {
 const DEG = Math.PI / 180;
 let orient = null;
 let pitchDeg = 0, rollDeg = 0;         // 手機長軸仰角、右側抬高角
-let basePitch = 35, baseRoll = 0;
+const NEUTRAL_PITCH = 45;              // 預設「不動」姿勢：手機往前傾 45°（平放 0°、直立 90°）
+let basePitch = NEUTRAL_PITCH, baseRoll = 0;
 let moveX = 0, moveY = 0;
 const DEAD = 6, FULL = 24;             // 死區與全速角度
+// 重新校正手勢：快速抬過 90° 再放回，放回停住的角度 = 新的不動姿勢
+const RECAL_UP = 92, RECAL_UP_MS = 120, RECAL_BACK = 85, RECAL_SETTLE_MS = 400, RECAL_SETTLE_DEG = 4, RECAL_TIMEOUT = 4000;
+const recal = { state: 'idle', since: 0, hist: [], doneAt: -9999 };
 
 function rotMatrix(alpha, beta, gamma) {
   const cX = Math.cos(beta * DEG), sX = Math.sin(beta * DEG);
@@ -148,7 +154,44 @@ function onOrientation(e) {
   pitchDeg = Math.atan2(m.m32, m.m33) / DEG;
   // 左右傾：短軸 (1,0,0) 的世界上分量 = 右側抬高
   rollDeg = Math.asin(clamp(m.m31, -1, 1)) / DEG;
+  updateRecal(performance.now());
   updateMove();
+}
+function updateRecal(now) {
+  const r = recal;
+  if (r.state === 'idle') {
+    if (pitchDeg > RECAL_UP && joined) { r.state = 'up'; r.since = now; r.armed = false; }
+    return;
+  }
+  if (r.state === 'up') {
+    if (now - r.since >= RECAL_UP_MS) r.armed = true;
+    if (pitchDeg < RECAL_BACK) {
+      if (!r.armed) { r.state = 'idle'; return; } // 只是瞬間晃過 90°（例如跳躍手勢），不算
+      r.state = 'settle'; r.since = now; r.hist = [];
+      $('gest').textContent = '重新校正中：放回想要的握法後停住'; $('gest').style.color = '#d9ff4a';
+    }
+    return;
+  }
+  if (r.state === 'settle') {
+    if (pitchDeg > RECAL_UP) { r.state = 'up'; r.since = now; r.armed = true; return; }
+    r.hist.push({ t: now, p: pitchDeg, r: rollDeg });
+    while (r.hist.length && now - r.hist[0].t > RECAL_SETTLE_MS) r.hist.shift();
+    const span = r.hist.length ? now - r.hist[0].t : 0;
+    if (span >= RECAL_SETTLE_MS * 0.9) {
+      let pMin = 999, pMax = -999, rMin = 999, rMax = -999, pSum = 0, rSum = 0;
+      for (const h of r.hist) { pMin = Math.min(pMin, h.p); pMax = Math.max(pMax, h.p); rMin = Math.min(rMin, h.r); rMax = Math.max(rMax, h.r); pSum += h.p; rSum += h.r; }
+      if (pMax - pMin < RECAL_SETTLE_DEG && rMax - rMin < RECAL_SETTLE_DEG) {
+        basePitch = pSum / r.hist.length; baseRoll = rSum / r.hist.length;
+        r.state = 'idle'; r.doneAt = now;
+        moveX = moveY = 0; sendMove(true);
+        $('gest').style.color = '';
+        flashGesture(`已重新校正：不動 = 仰角 ${basePitch.toFixed(0)}°`, 'hit');
+        if (vibrate && navigator.vibrate) navigator.vibrate([20, 40, 20]);
+        return;
+      }
+    }
+    if (now - r.since > RECAL_TIMEOUT) { r.state = 'idle'; r.doneAt = now; $('gest').textContent = ''; $('gest').style.color = ''; }
+  }
 }
 function captureBase() {
   if (!orient) return;
@@ -156,6 +199,7 @@ function captureBase() {
   moveX = moveY = 0; sendMove(true);
   if (vibrate && navigator.vibrate) navigator.vibrate(20);
 }
+function resetBase() { basePitch = NEUTRAL_PITCH; baseRoll = 0; moveX = moveY = 0; sendMove(true); }
 function curve(deg) {
   const a = Math.abs(deg);
   if (a < DEAD) return 0;
@@ -166,6 +210,8 @@ let lastMoveSent = 0, lastSent = { x: 9, y: 9 };
 function updateMove() {
   if (!joined) return;
   const now = performance.now();
+  // 重新校正手勢進行中：角色不動
+  if (recal.state !== 'idle') { if (moveX || moveY) { moveX = moveY = 0; sendMove(true); } $('tilt').firstElementChild.style.transform = 'translate(-50%, -50%)'; return; }
   // 手勢進行中與結束後 250ms 內姿態不可信：保持原值
   if (bursting || now - lastGestureAt < 250) return;
   let mx = -curve(rollDeg - baseRoll);   // 右側壓低 → 往右
@@ -219,6 +265,7 @@ function onMotion(e) {
   debugAcc = mag;
   const th = SENS[sensIdx].th;
   const now = performance.now();
+  if (recal.state !== 'idle' || now - recal.doneAt < 300) { bursting = false; return; } // 抬手重新校正時不算跳躍 / 敲擊
   if (!bursting) {
     if (mag > th && now - lastGestureAt > LOCKOUT) {
       bursting = true; burstStart = now; peak = mag; peakReached = false; classified = false;
@@ -280,7 +327,7 @@ $('vib').onclick = () => { vibrate = !vibrate; $('vib').textContent = `震動：
 
 function updateDebug() {
   if (joined && !orient) { $('gest').textContent = '⚠ 沒有姿態資料：請確認是 https 連線並允許感測器'; $('gest').style.color = '#ff6b6b'; }
-  else if (!gestFlashing && $('gest').style.color) { $('gest').textContent = ''; $('gest').style.color = ''; }
+  else if (!gestFlashing && recal.state === 'idle' && $('gest').style.color) { $('gest').textContent = ''; $('gest').style.color = ''; }
   $('debug').textContent = `acc ${debugAcc.toFixed(1)}  sign ${accSignLocked ? (accSign > 0 ? '+' : '-') : '?'}  th ${SENS[sensIdx].th}\npitch ${(pitchDeg - basePitch).toFixed(0)}° roll ${(rollDeg - baseRoll).toFixed(0)}°  move ${moveX.toFixed(2)},${moveY.toFixed(2)}\n${lastClass}`;
 }
 setInterval(updateDebug, 150);

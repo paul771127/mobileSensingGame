@@ -51,15 +51,15 @@
 </section>
 
 <section id="calibScreen" class="screen">
-  <h2 style="margin:0">📱 持握校正</h2>
+  <h2 style="margin:0">📱 持握方式</h2>
   <svg class="pose" viewBox="0 0 120 120" fill="none" stroke="#9aa3c7" stroke-width="4" stroke-linecap="round">
     <rect x="42" y="30" width="36" height="66" rx="7" transform="rotate(-25 60 63)" stroke="#d9ff4a"/>
     <path d="M30 100 q30 -10 60 0" />
   </svg>
-  <p style="max-width:320px;margin:0">像拿遙控器一樣<b>自然握著手機</b>，螢幕微微朝自己，<b>正對電腦螢幕</b>，保持不動後按下方按鈕。這個姿勢就是「站著不動」的基準。</p>
+  <p style="max-width:320px;margin:0">像拿遙控器一樣握著手機、<b>往前傾約 45°</b>（螢幕朝斜上方），<b>正對電腦螢幕</b>。這是預設的「站著不動」姿勢。</p>
   <p id="calibLive" class="muted" style="font-size:14px;min-height:20px">等待姿態感測器…</p>
-  <button id="calibDone" class="btn" disabled>完成校正</button>
-  <p class="muted" style="font-size:13px;max-width:320px">之後：手機<b>前後左右傾斜</b>走位、手腕<b>短促上抬</b>跳躍、<b>向前短推</b>敲擊。</p>
+  <button id="calibDone" class="btn" disabled>開始</button>
+  <p class="muted" style="font-size:13px;max-width:320px">之後：手機<b>前後左右傾斜</b>走位、手腕<b>短促上抬</b>跳躍、<b>向前短推</b>敲擊。<br>角度跑掉時：把手機<b>快速抬過 90° 再放回</b>，放回停住的角度就是新的不動姿勢。</p>
 </section>
 
 <section id="play" class="screen">
@@ -70,7 +70,7 @@
   </div>
   <div id="main">
     <div id="badge">藍</div>
-    <div id="look">請看電腦螢幕<small>傾斜走位 · 上抬跳躍 · 前推敲擊</small></div>
+    <div id="look">請看電腦螢幕<small>傾斜走位 · 上抬跳躍 · 前推敲擊<br>抬過 90° 再放回 = 重新校正</small></div>
     <div id="tilt"><i></i></div>
     <div id="gest"></div>
     <div id="sub" class="muted" style="font-size:14px;min-height:20px"></div>
