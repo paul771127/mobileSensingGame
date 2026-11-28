@@ -64,8 +64,9 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a1430);
-scene.fog = new THREE.Fog(0x0a1430, 38, 70);
+// 底色對齊美術預覽的灰藍：深青色的巨怪與鐘樓在近黑底色上會糊掉
+scene.background = new THREE.Color(0x3c5878);
+scene.fog = new THREE.Fog(0x3c5878, 38, 70);
 const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 200);
 const CAM_DIR = new THREE.Vector3(0.05, 1.0, 0.8).normalize();
 
@@ -80,7 +81,7 @@ scene.add(sun); scene.add(sun.target);
 const fill = new THREE.DirectionalLight(0x9fc3ff, 0.35); fill.position.set(10, 6, -8); scene.add(fill);
 
 // 海面
-const sea = new THREE.Mesh(new THREE.PlaneGeometry(200, 200, 1, 1), new THREE.MeshStandardMaterial({ color: 0x173d80, roughness: 0.6, metalness: 0.1 }));
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(200, 200, 1, 1), new THREE.MeshStandardMaterial({ color: 0x4f7396, roughness: 0.6, metalness: 0.1 }));
 sea.rotation.x = -Math.PI / 2; sea.position.y = -2.2; sea.receiveShadow = true; scene.add(sea);
 
 // 固定斜俯視：把整座島（含巨怪與鐘樓）收進畫面
@@ -283,7 +284,21 @@ const cellX = (c) => (c - gridInfo.cx) * gridInfo.s, cellZ = (r) => (r - gridInf
 function buildStatic(s) {
   gridInfo = s.grid;
   // 鐘樓
-  towerObj = models.tower.clone(); towerObj.position.set(s.tower.x, 0, s.tower.z); world.add(towerObj);
+  towerObj = new THREE.Group(); towerObj.position.set(s.tower.x, 0, s.tower.z); world.add(towerObj);
+  const towerModel = models.tower.clone();
+  if (models.usingGlb.tower) {
+    // 美術的鐘樓是原點在底部的小鐘亭（基座 1.5×1.4、鐘緣離地 0.9，角色站不進去）。
+    // 可站高度與半徑由遊戲邏輯決定（s.tower.top / radius）：程式畫石柱與塔頂平台當站位，
+    // 鐘亭照原比例立在平台北側（邏輯的鐘位置 bellX / bellZ），玩家站在它前面敲鐘。
+    const top = s.tower.top, R = s.tower.radius + 0.1, bx = s.tower.bellX || 0, bz = s.tower.bellZ || 0;
+    const stone = mat(0x6f8f9a), dark = mat(0x1d3a4c), deck = mat(0x2a6f78);
+    towerObj.add(cyl(R * 0.72, R * 0.86, top + 2.0, stone, 0, (top - 2.4) / 2, 0, 10));
+    towerObj.add(cyl(R, R * 0.9, 0.22, dark, 0, top - 0.33, 0, 10));
+    towerObj.add(cyl(R, R, 0.22, deck, 0, top - 0.11, 0, 10));
+    towerObj.add(box(1.7, 0.44, 1.6, dark, bx, top - 0.22, bz));
+    towerModel.position.set(bx, top, bz);
+  }
+  towerObj.add(towerModel);
   bellPivot = towerObj.getObjectByName('BellPivot');
   // 巨怪
   bossObj = models.boss.clone(); world.add(bossObj);

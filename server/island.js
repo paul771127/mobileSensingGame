@@ -44,7 +44,7 @@ const PAD_TIME = 1.0;
 
 const TOWER = { c: 11, r: 3, top: 3.2, radius: 1.35 };
 TOWER.x = cellX(TOWER.c); TOWER.z = cellZ(TOWER.r);
-const BELL_OFFSET = { x: 0, y: 4.0, z: 0 };
+const BELL_OFFSET = { x: 0, y: 4.0, z: -0.9 };  // 鐘亭立在塔頂平台北側（鏡頭後方），玩家站在它前面敲，不會被屋頂擋住
 const BOSS_ANCHOR = { x: 0, y: 0, z: cellZ(0) - 2.6 };
 const CORE_OFFSET = { x: 0, y: 1.1, z: 1.6 };   // 相對 Boss 根節點（面向 +Z）
 const MOUTH_OFFSET = { x: 0, y: 1.0, z: 1.3 };  // 嘴裡磚的位置（相對 Boss 根節點）
@@ -610,7 +610,7 @@ export class IslandGame {
     // 彈簧磚在斷橋旁、防護未開：離平台近的去敲鐘，另一人先到核心前站位
     if (platInZone && !b.pendingOpen) {
       const bell = this.bellPos();
-      if (p.onTower) { if (this.inReach(p, bell, 2.5)) { stop(); if (this.now >= p.hitCd) p.hitReq = true; } else this.botMoveTo(p, TOWER.x, TOWER.z, true); return; }
+      if (p.onTower) { if (this.inReach(p, bell, 2.5)) { stop(); if (this.now >= p.hitCd) p.hitReq = true; } else this.botMoveTo(p, TOWER.x + BELL_OFFSET.x * 0.4, TOWER.z + BELL_OFFSET.z * 0.4, true); return; }
       const px = cellX(springPlat.c), pz = cellZ(springPlat.r);
       const myD = Math.hypot(p.x - px, p.z - pz), hD = human ? Math.hypot(human.x - px, human.z - pz) : Infinity;
       const iGo = !human || (!human.onTower && hD > myD + 1.0);
@@ -781,7 +781,7 @@ export class IslandGame {
         target: b.target, coreHitAge: b.coreHitT != null ? r3(this.now - b.coreHitT) : 99, anchor: BOSS_ANCHOR, core: CORE_OFFSET, mouthOff: MOUTH_OFFSET,
       },
       flight, preds,
-      bridge: this.bridge, tower: { x: TOWER.x, z: TOWER.z, c: TOWER.c, r: TOWER.r, top: TOWER.top, radius: TOWER.radius, bellY: TOWER.top + 0.8 },
+      bridge: this.bridge, tower: { x: TOWER.x, z: TOWER.z, c: TOWER.c, r: TOWER.r, top: TOWER.top, radius: TOWER.radius, bellY: TOWER.top + 0.8, bellX: BELL_OFFSET.x, bellZ: BELL_OFFSET.z },
       pads: this.bellRungOnce ? this.pads : [], padsVisible: this.bellRungOnce,
       bell: { age: r3(this.now - this.bellRingT) },
       players, lastEvent: this.lastEvent,
