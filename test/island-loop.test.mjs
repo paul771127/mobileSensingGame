@@ -222,6 +222,27 @@ function runBotLured() {
   assert.ok(!g.players.A.dead);
 }
 
+// ---- 彈簧磚西邊那塊磚先被咬掉（敲往斷橋必站的位置）：電腦不該卡死或走進洞裡，等磚長回後仍能通關
+function runBotHoleRecovery() {
+  const g = new IslandGame();
+  g.setConnected('A', true, 'kb', true);
+  g.setBot('B', true);
+  g.action('A', 'hit'); step(g, 3.3);
+  const sp = spring(g);
+  let home = [cellX(sp.c - 1), cellZ(sp.r)], alt = [cellX(sp.c - 1), cellZ(sp.r + 1)], first = true, botFalls = 0, wasDead = false;
+  // 真人只會躲：第一次站在彈簧磚西邊讓它被咬，之後躲到角落，被鎖定就換一格
+  const ok = waitFor(g, () => g.phase === 'win', 200, () => {
+    const A = g.players.A, b = g.boss;
+    if (first && b.state === 'stuck') { first = false; assert.deepEqual([b.held.origin.c, b.held.origin.r], [sp.c - 1, sp.r]); home = [cellX(1), cellZ(5)]; alt = [cellX(2), cellZ(5)]; }
+    const onLocked = b.locked && Math.round(A.x / S + 4) === b.locked[0] && Math.round(A.z / S + 3) === b.locked[1];
+    const tgt = onLocked ? (Math.abs(A.x - home[0]) < 0.75 ? alt : home) : (['aim', 'lock', 'lunge'].includes(b.state) ? null : home);
+    if (tgt) { const dx = tgt[0] - A.x, dz = tgt[1] - A.z, d = Math.hypot(dx, dz); g.setMove('A', d > 0.1 ? dx / d : 0, d > 0.1 ? dz / d : 0); } else g.setMove('A', 0, 0);
+    const dead = g.players.B.dead; if (dead && !wasDead && !g.bellRungOnce) botFalls++; wasDead = dead;
+  });
+  assert.ok(ok, '電腦搭檔應在磚長回後完成整輪');
+  assert.ok(botFalls <= 1, `敲鐘前電腦不該一直掉進洞裡（掉了 ${botFalls} 次）`);
+}
+
 const t0 = Date.now();
 runLoop({ two: false }); console.log('✓ 單人完整循環');
 runLoop({ two: true }); console.log('✓ 雙人完整循環');
@@ -230,4 +251,5 @@ runSwallow(); console.log('✓ 錯過窗口 → 吞掉 → 長回');
 runAbilities(); console.log('✓ 能力區分流');
 runWithBot(); console.log('✓ 真人 + 電腦搭檔完整循環');
 runBotLured(); console.log('✓ 電腦被盯上會自己引怪跳開');
+runBotHoleRecovery(); console.log('✓ 關鍵磚被咬掉後電腦搭檔仍能通關');
 console.log(`全部通過（${Date.now() - t0} ms）`);

@@ -399,6 +399,7 @@ function updateHud(s) {
   const lobby = s.phase === 'lobby';
   if (s.phase !== lastPhase) { lastPhase = s.phase; if (lobby || s.phase === 'countdown') { $('banner').classList.remove('on'); bannerUntil = 0; } }
   $('lobby').classList.toggle('hidden', !lobby);
+  $('hint').style.visibility = lobby ? 'hidden' : ''; // 大廳說明已涵蓋，避免和底部提示重疊
   $('result').classList.toggle('hidden', !(s.phase === 'win' || s.phase === 'lose'));
   $('countdown').classList.toggle('hidden', s.phase !== 'countdown');
   if (s.phase === 'countdown') $('countdown').textContent = Math.ceil(s.countdown) || 'GO';

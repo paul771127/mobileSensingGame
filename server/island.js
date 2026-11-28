@@ -12,7 +12,7 @@ const MAP = [
   '..#####.....',
   '.#######....',
   '#1#######BB.',
-  '####oS###BBT',
+  '###o#S###BBT',
   '#2#######BB.',
   '.#######....',
   '..#####.....',
@@ -581,7 +581,7 @@ export class IslandGame {
     // 防護打開：打核心
     if (b.state === 'open') {
       if (this.inReach(p, core, 1.8)) { stop(); if (this.now >= p.hitCd) p.hitReq = true; return; }
-      if (p.onTower) { this.botMoveTo(p, TOWER.x - 2.2, TOWER.z, true); return; } // 走下塔（掉島後復活再跑）
+      if (p.onTower) { p.input.x = -1; p.input.y = 0; return; } // 往西走下塔（掉島後在安全磚復活再跑向核心）
       this.botMoveTo(p, coreFront.x, coreFront.z, true); return;
     }
     // 巨怪卡住：到能把磚敲進斷橋區（至少落在島上）的側邊位置，敲它
@@ -590,7 +590,8 @@ export class IslandGame {
       const spot = this.botHitSpot(p, m, b.held.kind === 'spring');
       const pred = this.predictLanding(p);
       const remain = b.until - this.now;
-      const good = pred.ok && (b.held.kind !== 'spring' || pred.inZone || remain < 1.2 || (spot && !spot.inZone));
+      // 彈簧磚只在落點對準斷橋時才敲：敲歪會卡在別處 30 秒，不如讓它被吞掉、8 秒後長回原位重來
+      const good = pred.ok && (b.held.kind !== 'spring' || pred.inZone);
       const reacted = this.now - b.stuckAt >= 0.8 || remain < 0.6; // 反應時間：留給真人先敲的機會
       if (this.inReach(p, m, 2.2) && good && reacted) { stop(); if (this.now >= p.hitCd) p.hitReq = true; return; }
       if (spot) this.botMoveTo(p, spot.x, spot.z, true); else stop();
@@ -645,11 +646,16 @@ export class IslandGame {
       const [sc, sr] = toCell(sx, sz);
       if (excludeCell && sc === excludeCell[0] && sr === excludeCell[1]) continue;
       if (!this.surfacesAt(sx, sz).some((sf) => sf.top <= TILE_H + 0.01)) continue;
-      const [lc, lr] = toCell(mouth.x + dx * FLIGHT_DIST, mouth.z + dz * FLIGHT_DIST);
-      const ok = inGrid(lc, lr) && !(lc === TOWER.c && lr === TOWER.r);
+      const landAt = (ang) => {
+        const [lc, lr] = toCell(mouth.x + Math.cos(ang) * FLIGHT_DIST, mouth.z + Math.sin(ang) * FLIGHT_DIST);
+        return { lc, lr, ok: inGrid(lc, lr) && !(lc === TOWER.c && lr === TOWER.r) };
+      };
+      const { lc, lr, ok } = landAt(a);
+      // 電腦不會站得分毫不差：左右偏 6° 也要落在場內才算數
+      if (!ok || !landAt(a - 0.1).ok || !landAt(a + 0.1).ok) continue;
       const inZone = this.bridge.some(([c, r]) => c === lc && r === lr);
-      if (!ok) continue;
-      let score = (inZone ? 10 : 0) * (wantZone ? 1 : 0.2) - Math.hypot(p.x - sx, p.z - sz) * 0.3;
+      const solid = this.tiles.has(key(lc, lr));
+      let score = (inZone ? 10 : solid ? 3 : 0) * (wantZone ? 1 : 0.2) - Math.hypot(p.x - sx, p.z - sz) * 0.3;
       if (score > bestScore) { bestScore = score; best = { x: sx, z: sz, inZone, ok }; }
     }
     return best;
@@ -720,6 +726,7 @@ export class IslandGame {
     const path = p.botPath;
     while (path.length > 1 && path[0][0] === from[0] && path[0][1] === from[1] && Math.hypot(cellX(path[1][0]) - p.x, cellZ(path[1][1]) - p.z) < 0.9 && path.length > 2) path.shift();
     let tx = x, tz = z;
+    if (direct && !this.surfacesAt(x, z).length) direct = false;
     if (path.length > 1) {
       const next = path[0][0] === from[0] && path[0][1] === from[1] ? path[1] : path[0];
       const last = path[path.length - 1];
