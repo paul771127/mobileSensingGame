@@ -55,7 +55,10 @@ function renderState(s) {
   if (!mySide || gestFlashing) return;
   const me = s.players?.[mySide];
   let sub = '';
-  if (s.phase === 'lobby') sub = '向前短推（或按下方按鈕）開始';
+  const showBot = s.phase === 'lobby' && (s.bots > 0 || s.n < 4);
+  $('botBtn').style.display = showBot ? '' : 'none';
+  $('botBtn').textContent = s.bots > 0 ? `🤖 已有 ${s.bots} 位電腦隊友（再按一次移除）` : '🤖 人不夠？補滿電腦隊友';
+  if (s.phase === 'lobby') sub = s.bots > 0 ? '電腦隊友就位，向前短推開始' : '向前短推（或按下方按鈕）開始';
   else if (s.phase === 'countdown') sub = '準備…';
   else if (s.phase === 'upgrade') sub = me?.pick?.done ? '已選好，等隊友' : '左右傾斜切換技能，回正停住確認';
   else if (s.phase === 'win' || s.phase === 'lose') sub = '向前短推再來一局';
@@ -315,6 +318,7 @@ function flashGesture(text, kind) {
 // 備援按鈕（沒有感測器 / 桌機測試）
 $('tapJump').addEventListener('pointerdown', (e) => { e.preventDefault(); if (joined) sendAct('jump'); });
 $('tapHit').addEventListener('pointerdown', (e) => { e.preventDefault(); if (joined) sendAct('hit'); });
+$('botBtn').onclick = () => { ws.send({ type: 'bot', on: !(lastState?.bots > 0) }); };
 $('sens').onclick = () => { sensIdx = (sensIdx + 1) % SENS.length; $('sens').textContent = `手勢靈敏度：${SENS[sensIdx].label}`; };
 $('flipY').onclick = () => { flipY = !flipY; $('flipY').textContent = `前後反轉：${flipY ? '開' : '關'}`; };
 $('flipX').onclick = () => { flipX = !flipX; $('flipX').textContent = `左右反轉：${flipX ? '開' : '關'}`; };

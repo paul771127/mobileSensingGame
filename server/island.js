@@ -71,7 +71,7 @@ export class IslandGame {
     this.now = 0; this.phase = 'lobby'; this.phaseAt = 0; this.countdownAt = 0; this.startedAt = 0; this.endedAt = 0;
     this.lastEvent = null; this.nextId = 1;
     this.buildMap();
-    for (const s of SIDES) { const keep = this.players[s]; const p = this.newPlayer(s); p.connected = keep.connected; p.name = keep.name; p.kb = keep.kb; this.players[s] = p; if (p.connected) this.placeAtSpawn(p); }
+    for (const s of SIDES) { const keep = this.players[s]; const p = this.newPlayer(s); p.connected = keep.connected; p.name = keep.name; p.kb = keep.kb; p.bot = keep.bot; this.players[s] = p; if (p.connected) this.placeAtSpawn(p); }
     this.enemies = []; this.projectiles = []; this.spawning = []; this.regrow = [];
     this.kills = 0; this.upgradesEarned = 0; this.upgradesDone = 0; this.upgrade = null;
     this.stageIdx = 0; this.waveIdx = -1; this.waveState = 'idle'; this.waveAt = 0; this.transition = null;
@@ -85,7 +85,7 @@ export class IslandGame {
   }
   newPlayer(side) {
     return {
-      side, connected: false, name: null, kb: false,
+      side, connected: false, name: null, kb: false, bot: false, botJumpAt: -9, botPickAt: 0,
       x: 0, y: 0, z: 0, prevY: 0, vx: 0, vy: 0, vz: 0, facing: Math.PI, grounded: true, airborne: false, airT: 0,
       input: { x: 0, y: 0 }, jumpReq: false, hitReq: false,
       hp: PLAYER_HP, maxHp: PLAYER_HP, downed: false, downAt: 0, reviveT: 0, helper: null, invulnUntil: 0, hurtAt: -99, shield: 0, shieldUntil: 0,
@@ -108,15 +108,31 @@ export class IslandGame {
   setConnected(side, on, name, kb = false) {
     const p = this.players[side]; if (!p) return;
     const was = p.connected;
-    p.connected = on; p.kb = on ? kb : false; if (name) p.name = name;
+    p.connected = on; p.kb = on ? kb : false; p.bot = false; if (name) p.name = name;
     if (on && !was) {
       this.placeAtSpawn(p); p.input = { x: 0, y: 0 }; p.downed = false; p.hp = PLAYER_HP; p.skills = {};
       if (this.phase === 'upgrade') p.upgradeDone = true;
       if (this.phase !== 'lobby') this.pushEvent('join', `${this.label(side)} 加入了`, side);
     }
-    if (!on) { p.input = { x: 0, y: 0 }; if (this.playerCount() === 0 && this.phase !== 'lobby') this.resetMatch(); }
+    if (!on) { p.input = { x: 0, y: 0 }; if (this.humanCount() === 0 && this.phase !== 'lobby') this.resetMatch(); }
   }
+  // 電腦隊友：占用空位，真人加入時自動讓位；計入人數縮放，一個人也能打四人規模
+  setBot(side, on) {
+    const p = this.players[side]; if (!p) return;
+    if (on) {
+      if (p.connected && !p.bot) return;
+      p.connected = true; p.bot = true; p.kb = false; p.name = '電腦';
+      this.placeAtSpawn(p); p.input = { x: 0, y: 0 }; p.downed = false; p.hp = PLAYER_HP; p.skills = {};
+      if (this.phase === 'upgrade') { p.upgradeDone = false; p.upgradeCursor = this.firstAvailable(p, 0, 1); p.botPickAt = this.now + 2; }
+    } else if (p.bot) {
+      p.connected = false; p.bot = false; p.input = { x: 0, y: 0 };
+      if (this.humanCount() === 0 && this.phase !== 'lobby') this.resetMatch();
+    }
+  }
+  fillBots(on) { for (const s of SIDES) { const p = this.players[s]; if (on && !p.connected) this.setBot(s, true); else if (!on && p.bot) this.setBot(s, false); } }
   playerCount() { return SIDES.filter((s) => this.players[s].connected).length; }
+  humanCount() { return SIDES.filter((s) => this.players[s].connected && !this.players[s].bot).length; }
+  botCount() { return SIDES.filter((s) => this.players[s].connected && this.players[s].bot).length; }
   n() { return Math.max(1, Math.min(4, this.playerCount())); }
   setMove(side, x, y) { const p = this.players[side]; if (!p || !p.connected) return; p.input.x = clamp(num(x), -1, 1); p.input.y = clamp(num(y), -1, 1); }
   action(side, kind) { const p = this.players[side]; if (!p || !p.connected) return; if (kind === 'jump') p.jumpReq = true; else if (kind === 'hit') p.hitReq = true; }
@@ -127,20 +143,20 @@ export class IslandGame {
   update(dt) {
     this.now += dt;
     if (this.phase === 'lobby') {
-      for (const s of SIDES) { const p = this.players[s]; if (p.connected && p.hitReq) this.startCountdown(); p.hitReq = false; }
+      for (const s of SIDES) { const p = this.players[s]; if (p.connected && !p.bot && p.hitReq) this.startCountdown(); p.hitReq = false; }
       this.updatePlayers(dt, true); return;
     }
     if (this.phase === 'countdown') {
-      if (this.playerCount() === 0) return this.resetMatch();
+      if (this.humanCount() === 0) return this.resetMatch();
       this.updatePlayers(dt, true);
       if (this.now >= this.countdownAt) this.startRun();
       return;
     }
     if (this.phase === 'win' || this.phase === 'lose') {
-      for (const s of SIDES) { const p = this.players[s]; if (p.connected && p.hitReq && this.now - this.phaseAt > 2.5) { this.resetMatch(); this.startCountdown(); } p.hitReq = false; p.jumpReq = false; }
+      for (const s of SIDES) { const p = this.players[s]; if (p.connected && !p.bot && p.hitReq && this.now - this.phaseAt > 2.5) { this.resetMatch(); this.startCountdown(); } p.hitReq = false; p.jumpReq = false; }
       return;
     }
-    if (this.phase === 'upgrade') { this.updateUpgrade(dt); return; }
+    if (this.phase === 'upgrade') { this.updateBotPicks(); this.updateUpgrade(dt); return; }
     if (this.phase === 'transition') {
       for (const s of SIDES) { this.players[s].jumpReq = false; this.players[s].hitReq = false; }
       if (this.now >= this.transition.until) this.endTransition();
@@ -153,11 +169,12 @@ export class IslandGame {
     if (this.phase === 'boss') this.updateBoss(dt);
     this.updateEnemies(dt);
     this.updateProjectiles(dt);
+    this.updateBots(dt);
     this.updatePlayers(dt, false);
     this.updateRevive(dt);
     this.checkDefeat();
   }
-  startCountdown() { this.phase = 'countdown'; this.countdownAt = this.now + 3; this.pushEvent('countdown', `${this.n()} 人出發，準備！`); }
+  startCountdown() { this.phase = 'countdown'; this.countdownAt = this.now + 3; const nb = this.botCount(); this.pushEvent('countdown', nb ? `${this.humanCount()} 人 + ${nb} 位電腦隊友出發，準備！` : `${this.n()} 人出發，準備！`); }
   startRun() {
     this.phase = 'wave'; this.phaseAt = this.now; this.startedAt = this.now;
     for (const s of SIDES) if (this.players[s].connected) { this.placeAtSpawn(this.players[s]); this.players[s].hp = PLAYER_HP; }
@@ -259,7 +276,7 @@ export class IslandGame {
   beginUpgrade() {
     this.phase = 'upgrade';
     this.upgrade = { until: this.now + UPGRADE_TIMEOUT, index: this.upgradesDone + 1 };
-    for (const s of SIDES) { const p = this.players[s]; p.upgradeDone = !p.connected; p.upgradeConfirm = 0; p.upgradeMoveAt = 0; p.upgradeChoice = null; p.upgradeCursor = this.firstAvailable(p, 0, 1); p.input = { x: 0, y: 0 }; p.vx = p.vz = 0; }
+    for (const s of SIDES) { const p = this.players[s]; p.upgradeDone = !p.connected; p.upgradeConfirm = 0; p.upgradeMoveAt = 0; p.upgradeChoice = null; p.upgradeCursor = this.firstAvailable(p, 0, 1); p.input = { x: 0, y: 0 }; p.vx = p.vz = 0; p.botPickAt = this.now + 1.5 + SIDES.indexOf(s) * 0.7; }
     this.pushEvent('upgrade', `第 ${this.upgrade.index} 次升級：手機左右傾斜切換、回正停住確認`, null);
   }
   skillAvailable(p, id) { return (p.skills[id] || 0) < 2; }
@@ -426,7 +443,9 @@ export class IslandGame {
     if (!p.downed) this.pushEvent('fall', `${this.label(p.side)} 掉下島了，回到中央`, p.side, true);
   }
   updateDowned(p) {
-    if (this.playerCount() <= 1 && this.now - p.downAt >= SOLO_RECOVER) {
+    // 沒有任何可以來救的隊友（真人或電腦）時才自己爬起
+    const helpers = SIDES.filter((s) => { const q = this.players[s]; return q !== p && q.connected && !q.downed; });
+    if (helpers.length === 0 && this.now - p.downAt >= SOLO_RECOVER) {
       this.soloLivesUsed++;
       if (this.soloLivesUsed > SOLO_LIVES) return this.finish('lose');
       this.revive(p, null);
@@ -455,6 +474,59 @@ export class IslandGame {
   healAll(n) { for (const s of SIDES) { const p = this.players[s]; if (p.connected && !p.downed) p.hp = Math.min(p.maxHp, p.hp + n); } }
   checkDefeat() {
     if (this.playerCount() >= 2 && this.alive().length === 0 && (this.phase === 'wave' || this.phase === 'boss')) this.finish('lose');
+  }
+
+  // ---------- 電腦隊友 ----------
+  updateBots(dt) {
+    for (const s of SIDES) { const p = this.players[s]; if (!p.connected || !p.bot || p.downed) continue; try { this.botThink(p); } catch (e) { console.error('bot error', e); p.input = { x: 0, y: 0 }; } }
+  }
+  botThink(p) {
+    let tx = null, tz = null;
+    // 1. 倒地隊友（真人優先）
+    let downed = null;
+    for (const s of SIDES) { const q = this.players[s]; if (q === p || !q.connected || !q.downed) continue; if (!downed || (!q.bot && downed.bot)) downed = q; }
+    if (downed) { tx = downed.x; tz = downed.z; }
+    // 2. Boss 露核心 → 核心前
+    if (tx == null && this.boss && this.boss.state === 'exposed') { const c = this.coreFront(); tx = c.x; tz = c.z; }
+    // 3. 追最近的敵人（遠程怪稍優先）
+    if (tx == null) {
+      let best = null, bd = Infinity;
+      for (const e of this.enemies) { if (e.dead) continue; const d = Math.hypot(e.x - p.x, e.z - p.z) * (e.kind === 'ranged' ? 0.8 : 1); if (d < bd) { bd = d; best = e; } }
+      if (best) { tx = best.x; tz = best.z; }
+    }
+    // 4. 沒事做：跟著最近的真人
+    if (tx == null) { let h = null, hd = Infinity; for (const s of SIDES) { const q = this.players[s]; if (q === p || !q.connected || q.bot) continue; const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < hd) { hd = d; h = q; } } if (h && hd > 2.5) { tx = h.x; tz = h.z; } }
+    // 避開 Boss 咬痕 / 鎖定範圍
+    if (this.boss && ['aim', 'lock', 'lunge'].includes(this.boss.state)) {
+      const cells = this.boss.locked || this.boss.cands || [];
+      const [c, r] = toCell(p.x, p.z);
+      if (cells.some(([cc, rr]) => cc === c && rr === r)) { tx = p.x; tz = p.z + 3.5; if (this.surfaceAt(tx, tz) == null) { tz = p.z - 3.5; } }
+    }
+    // 避開精英衝撞線
+    for (const e of this.enemies) {
+      if (e.dead || e.kind !== 'elite' || e.state !== 'windup' || !e.dir) continue;
+      const rx = p.x - e.x, rz = p.z - e.z, along = rx * e.dir.x + rz * e.dir.z, side = -rx * e.dir.z + rz * e.dir.x;
+      if (along > -0.5 && along < 8 && Math.abs(side) < 1.3) { const sg = Math.sign(side || 1); tx = p.x - e.dir.z * 3 * sg; tz = p.z + e.dir.x * 3 * sg; }
+    }
+    if (tx == null) { p.input.x = 0; p.input.y = 0; return; }
+    const dx = tx - p.x, dz = tz - p.z, d = Math.hypot(dx, dz);
+    if (d < 0.9) { p.input.x = 0; p.input.y = 0; return; }
+    let ux = dx / d, uz = dz / d;
+    const ok = (vx, vz) => this.surfaceAt(p.x + vx * 0.7, p.z + vz * 0.7) != null && this.surfaceAt(p.x + vx * 1.2, p.z + vz * 1.2) != null;
+    if (!ok(ux, uz)) { const alt = [[-uz, ux], [uz, -ux]].find(([vx, vz]) => ok(vx, vz)); if (!alt) { p.input.x = 0; p.input.y = 0; return; } [ux, uz] = alt; }
+    p.input.x = ux; p.input.y = uz;
+    // 有震地時靠近小怪跳一下
+    if (p.skills.quake && p.grounded && this.now - p.botJumpAt > 2.5 && this.enemies.some((e) => !e.dead && Math.hypot(e.x - p.x, e.z - p.z) < 2)) { p.botJumpAt = this.now; p.jumpReq = true; }
+  }
+  // 升級：電腦依偏好順序選還能升的技能，稍等一下再確認讓大家看得到
+  updateBotPicks() {
+    const PREF = { A: ['quake', 'chain', 'guard', 'whirl'], B: ['guard', 'chain', 'whirl', 'quake'], C: ['chain', 'quake', 'guard', 'whirl'], D: ['whirl', 'guard', 'quake', 'chain'] };
+    for (const s of SIDES) {
+      const p = this.players[s]; if (!p.connected || !p.bot || p.upgradeDone) continue;
+      const want = PREF[s].find((id) => this.skillAvailable(p, id)) || SKILL_IDS[0];
+      p.upgradeCursor = SKILL_IDS.indexOf(want);
+      if (this.now >= p.botPickAt) this.confirmUpgrade(p);
+    }
   }
 
   // ---------- 敵人 ----------
@@ -664,7 +736,7 @@ export class IslandGame {
     for (const s of SIDES) {
       const p = this.players[s];
       players[s] = {
-        connected: p.connected, name: p.name, kb: p.kb,
+        connected: p.connected, name: p.name, kb: p.kb, bot: p.bot,
         x: r3(p.x), y: r3(p.y), z: r3(p.z), vx: r3(p.vx), vy: r3(p.vy), vz: r3(p.vz), facing: r3(p.facing), grounded: p.grounded,
         hp: p.hp, maxHp: p.maxHp, downed: p.downed, reviveT: r3(p.reviveT), helper: p.helper || null, invuln: this.now < p.invulnUntil, shield: p.shield,
         hitAge: r3(this.now - p.hitAt), hurtAge: r3(this.now - p.hurtAt), targetId: p.targetId, skills: p.skills,
@@ -677,7 +749,7 @@ export class IslandGame {
     const stage = STAGES[this.stageIdx];
     const remaining = this.enemies.filter((e) => !e.dead).length + this.spawning.length;
     return {
-      game: 'island', phase: this.phase, t: Math.round(this.now * 1000), n: this.playerCount(), elapsed: r3(this.elapsed()),
+      game: 'island', phase: this.phase, t: Math.round(this.now * 1000), n: this.playerCount(), humans: this.humanCount(), bots: this.botCount(), elapsed: r3(this.elapsed()),
       countdown: this.phase === 'countdown' ? Math.max(0, this.countdownAt - this.now) : 0,
       grid: { cols: COLS, rows: ROWS, cx: CX, cz: CZ, s: S }, gate: GATE, shrine: SHRINE,
       tiles, regrow: this.regrow.map((g) => ({ c: g.c, r: g.r, in: r3(Math.max(0, g.at - this.now)) })),

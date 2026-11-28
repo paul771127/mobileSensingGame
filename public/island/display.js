@@ -291,11 +291,11 @@ function updateHud(s) {
     const p = s.players[side];
     const hearts = Array.from({ length: p.maxHp }, (_, i) => `<i class="${i < p.hp ? '' : 'off'}"></i>`).join('') + Array.from({ length: p.shield || 0 }, () => '<i class="sh"></i>').join('');
     const skills = Object.entries(p.skills || {}).map(([id, lv]) => `<img src="/assets/island/skills/${s.skills[id].icon}" title="${s.skills[id].name}">${lv >= 2 ? '<span class="lv">2</span>' : ''}`).join('');
-    const st = !p.connected ? '未加入' : p.downed ? (p.helper ? `救援中 ${Math.round(p.reviveT * 100)}%` : '倒地！') : ph === 'upgrade' && p.pick ? (p.pick.done ? '已選' : '選技能中…') : (p.kb ? '鍵盤' : '手機');
-    return `<div class="pcard pill ${p.connected ? '' : 'off'}"><div class="dot bg-${side}"></div><div><b class="${side}">${PNUM[side]} ${LABEL[side]}${p.name && !p.kb ? ' · ' + esc(p.name) : ''}</b><div class="hearts">${p.connected ? hearts : ''}</div><div class="skills">${skills}</div><div class="st">${st}</div></div></div>`;
+    const st = !p.connected ? '未加入' : p.downed ? (p.helper ? `救援中 ${Math.round(p.reviveT * 100)}%` : '倒地！') : ph === 'upgrade' && p.pick ? (p.pick.done ? '已選' : '選技能中…') : (p.bot ? '電腦隊友' : p.kb ? '鍵盤' : '手機');
+    return `<div class="pcard pill ${p.connected ? '' : 'off'}"><div class="dot bg-${side}"></div><div><b class="${side}">${PNUM[side]} ${LABEL[side]}${p.name && !p.kb && !p.bot ? ' · ' + esc(p.name) : ''}</b><div class="hearts">${p.connected ? hearts : ''}</div><div class="skills">${skills}</div><div class="st">${st}</div></div></div>`;
   }).join('');
-  $('slots').innerHTML = SIDES.map((side) => `<div class="slot ${side} ${s.players[side].connected ? 'on' : ''}">${PNUM[side]} ${LABEL[side]}<br><small style="color:var(--muted)">${s.players[side].connected ? (s.players[side].kb ? '鍵盤' : '已加入') : '空位'}</small></div>`).join('');
-  $('joinLine').textContent = s.n === 0 ? '等待手機加入…（或按 1～4 用鍵盤試玩）' : `${s.n} 位已加入：任一人向前短推開始，或等更多人`;
+  $('slots').innerHTML = SIDES.map((side) => `<div class="slot ${side} ${s.players[side].connected ? 'on' : ''}">${PNUM[side]} ${LABEL[side]}<br><small style="color:var(--muted)">${s.players[side].connected ? (s.players[side].bot ? '電腦' : s.players[side].kb ? '鍵盤' : '已加入') : '空位'}</small></div>`).join('');
+  $('joinLine').textContent = s.humans === 0 ? '等待手機加入…（或按 1～4 用鍵盤試玩）' : s.bots ? `${s.humans} 人 + ${s.bots} 位電腦隊友：向前短推開始` : `${s.n} 位已加入：向前短推開始，等更多人，或按 B 補滿電腦隊友`;
   if (ph === 'upgrade' && s.upgrade) renderUpgrade(s);
   $('hintText').innerHTML = hintFor(s);
 }
@@ -457,6 +457,7 @@ addEventListener('keydown', (e) => {
   if (e.repeat) { if (mapped) e.preventDefault(); return; }
   if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code)) { const side = SIDES[Number(e.code.slice(-1)) - 1]; kbOn[side] = !kbOn[side]; ws.send({ type: 'kb', side, on: kbOn[side] }); return; }
   if (e.code === 'KeyR') { ws.send({ type: 'reset' }); return; }
+  if (e.code === 'KeyB' && !kbOn.A) { const hasBot = SIDES.some((sd) => state?.players?.[sd]?.bot); ws.send({ type: 'bot', on: !hasBot }); return; } // 補滿 / 移除電腦隊友（P1 用 WASD 時 B 不佔用）
   if (e.code === 'KeyF' && !keys.size && !kbOn.D) { document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.(); return; }
   if (e.code === 'KeyE' || (e.code === 'Enter' && (state?.phase === 'win' || state?.phase === 'lose' || state?.phase === 'lobby'))) {
     if (state?.phase === 'win' || state?.phase === 'lose') { ws.send({ type: 'restart' }); return; }

@@ -142,6 +142,24 @@ function runFourPlayers() {
   assert.ok(new Set(xs.map((x) => x.toFixed(1))).size === 4, '四人出生位置應錯開');
 }
 
+// ---- 一個真人 + 三位電腦隊友：真人只用腳本追怪，電腦自己選技能、救人、打核心
+function runSoloWithBots() {
+  const g = new IslandGame();
+  g.setConnected('A', true, 'kb', true);
+  g.fillBots(true);
+  assert.equal(g.playerCount(), 4); assert.equal(g.botCount(), 3); assert.equal(g.humanCount(), 1);
+  g.action('A', 'hit'); step(g, 3.3);
+  assert.equal(g.phase, 'wave');
+  let t = 0;
+  while (g.phase !== 'win' && g.phase !== 'lose' && t < 900) { botStep(g, 'A', 'quake'); g.update(DT); t += DT; }
+  console.log(`   結果 ${g.phase}，用時 ${Math.round(g.elapsed())} 秒，擊倒 ${g.kills}，升級 ${g.upgradesDone} 次，倒地 ${g.stats.downs} 救援 ${g.stats.revives}，電腦技能 ${['B', 'C', 'D'].map((s) => JSON.stringify(g.players[s].skills)).join(' ')}`);
+  assert.equal(g.phase, 'win', '一人 + 三電腦應能打完這局');
+  assert.ok(['B', 'C', 'D'].every((s) => Object.keys(g.players[s].skills).length > 0), '電腦隊友應各自選到技能');
+  // 真人加入會接手電腦位置
+  g.setConnected('B', true, 'phone');
+  assert.ok(!g.players.B.bot && g.players.B.connected && g.botCount() === 2);
+}
+
 const t0 = Date.now();
 // 腳本玩家不會閃投射物，偶爾會輸；允許重試，連輸三次才算失敗
 let coopOk = false, lastErr = null;
@@ -151,4 +169,6 @@ console.log('✓ 兩人完整一局：共用計數 → 各選技能 → Boss 房
 runSoloScale(); console.log('✓ 單人：門檻與敵人數量縮減、倒地自己爬起');
 runRevive(); console.log('✓ 倒地救援 / 護友 / 全員倒地失敗');
 runFourPlayers(); console.log('✓ 四人加入與規模');
+{ let ok = false, err = null; for (let i = 0; i < 3 && !ok; i++) { try { runSoloWithBots(); ok = true; } catch (e) { err = e; console.log(`   （第 ${i + 1} 次未過關：${e.message.split('\n')[0]}）`); } } if (!ok) throw err; }
+console.log('✓ 一人 + 三位電腦隊友完整一局、真人中途接手');
 console.log(`全部通過（${Date.now() - t0} ms）`);

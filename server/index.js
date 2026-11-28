@@ -267,8 +267,13 @@ function handleIslandMessage(ws, room, msg) {
       if (msg.act === 'jump' || msg.act === 'hit') game.action(side, msg.act);
       return true;
     }
-    case 'bot':    // 闖關版暫無電腦搭檔
+    case 'bot': {  // { on, side? } 電腦隊友：沒指定位置就補滿 / 清空所有空位
+      const on = msg.on !== false;
+      if (room.sides.includes(msg.side)) { if (!room.controllers[msg.side]) game.setBot(msg.side, on); }
+      else game.fillBots(on);
+      room.broadcast(room.playersMsg());
       return true;
+    }
     case 'swing': case 'offset': case 'pose':
       return true; // 球拍遊戲的訊息，島上忽略
     case 'reset':
